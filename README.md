@@ -40,6 +40,12 @@ src/
 │   ├── claude/
 │   │   ├── claude.ts     ← spawn `claude --print`——唯一碰 claude 的地方
 │   │   └── stream-json.ts ← claude stream-json 事件归约器（纯函数）
+│   ├── grok/
+│   │   ├── grok.ts           ← spawn `grok` headless (streaming-json)
+│   │   └── streaming-json.ts ← grok streaming-json reducer (pure)
+│   ├── cursor/
+│   │   ├── cursor.ts         ← spawn `cursor-agent --print` (stream-json)
+│   │   └── stream-json.ts    ← cursor stream-json reducer (pure)
 │   └── codex/
 │       ├── codex.ts      ← spawn `codex exec --json`——唯一碰 codex 的地方
 │       └── codex-jsonl.ts ← codex JSONL 事件归约器（纯函数）

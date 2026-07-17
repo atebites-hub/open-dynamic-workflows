@@ -66,7 +66,7 @@ These are injected into the script scope:
   matching object and `agent()` resolves to the **validated object**. Returns `null` if the
   agent is skipped/aborted (filter with `.filter(Boolean)`). `opts`: `executor` (**required** —
   picks which agent CLI runs this node, by name, from the registry the host provides, e.g.
-  `'claude'` or `'codex'`; an unknown name fails the run), `label` (short display label),
+  `'claude'`, `'codex'`, `'grok'`, or `'cursor'`; an unknown name fails the run), `label` (short display label),
   `phase` (assign to a progress group — **use this inside parallel/pipeline stages**),
   `schema`, `model` (override; omit to inherit), `isolation:'worktree'` (fresh git worktree —
   EXPENSIVE, only when agents mutate files in parallel), `agentType` (named subagent preset).
@@ -94,7 +94,7 @@ Because `executor` is **per node**, one script can mix CLIs — e.g. have one CL
 different one review, when you want the verifier to be a different model from the author:
 
 ```js
-// Each agent() names its own CLI. Both 'claude' and 'codex' come from the host's registry.
+// Each agent() names its own CLI. Names like 'claude', 'codex', 'grok', and 'cursor' come from the host's registry (bundled).
 const draft = await agent('Draft a fix for this failing test.', { executor: 'claude', label: 'draft' })
 const review = await agent(`Independently review this fix — is it correct?\n\n${draft}`, {
   executor: 'codex', label: 'review', schema: VERDICT_SCHEMA,

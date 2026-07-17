@@ -43,6 +43,12 @@ src/
 │   ├── claude/
 │   │   ├── claude.ts     ← spawn `claude --print` — the only place that touches claude
 │   │   └── stream-json.ts ← claude stream-json event reducer (pure)
+│   ├── grok/
+│   │   ├── grok.ts           ← spawn `grok` headless (streaming-json)
+│   │   └── streaming-json.ts ← grok streaming-json reducer (pure)
+│   ├── cursor/
+│   │   ├── cursor.ts         ← spawn `cursor-agent --print` (stream-json)
+│   │   └── stream-json.ts    ← cursor stream-json reducer (pure)
 │   └── codex/
 │       ├── codex.ts      ← spawn `codex exec --json` — the only place that touches codex
 │       └── codex-jsonl.ts ← codex JSONL event reducer (pure)
