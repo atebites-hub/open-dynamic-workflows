@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 
 import { runWorkflow } from "./runtime/run.js";
 import type { Executor, ExecOptions, ExecResult, ProgressEvent, RunOptions } from "./types.js";
@@ -89,6 +90,25 @@ return { text: t };
 // (b) agent() with schema returns the validated structured object { ok: true }
 // (b) 带 schema 的 agent() 返回经校验的结构化对象 { ok: true }
 // ────────────────────────────────────────────────────────────────────────────
+
+test("worktree isolation creates a separate checkout for a mutating agent", async () => {
+  const runDir = uniqueRunDir("worktree");
+  let executorCwd = "";
+  const executor: Executor = async (execOpts) => {
+    executorCwd = execOpts.cwd ?? "";
+    return makeFakeResult(execOpts);
+  };
+  const script = `${META}
+const value = await agent('inspect the current checkout path and report it', { executor: 'fake', isolation: 'worktree' });
+return value;
+`;
+  await runWorkflow({ ...opts("worktree", script), runDir, executors: { fake: executor } });
+  assert.notEqual(executorCwd, process.cwd());
+  assert.match(executorCwd, /worktrees[\\/]agent-1$/);
+
+  const listed = execFileSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8" });
+  assert.doesNotMatch(listed, new RegExp(executorCwd.replace(/[.*+?^${}()|[\]\\\\]/g, "\\\\$&")));
+});
 
 test("(b) agent() with schema returns the structured object { ok: true }", async () => {
   const script = `${META}

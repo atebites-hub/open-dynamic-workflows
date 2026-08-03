@@ -68,23 +68,19 @@ function oneLine(s: string, max = 300): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-// Best-effort temp git worktree for isolation:"worktree". Returns the worktree dir, or
-// 为 isolation:"worktree" 尽力创建临时 git worktree。返回 worktree 目录，
-// null on any git failure (caller then falls back to ctx.cwd with a warning).
-// 任何 git 失败则返回 null（调用方随后带警告回退到 ctx.cwd）。
-function createWorktree(repoCwd: string, runDir: string, agentId: number): string | null {
+// Create a temporary detached worktree for isolation:"worktree".
+// 为 isolation:"worktree" 创建临时 detached worktree。
+// Isolation is fail-closed: falling back to ctx.cwd would let parallel agents
+// mutate the caller's checkout, which is more dangerous than failing the agent.
+// 隔离失败时 fail-closed：回退到 ctx.cwd 会让并行 agent 修改调用者 checkout，
+// 这比让 agent 失败更危险。
+function createWorktree(repoCwd: string, runDir: string, agentId: number): string {
   const wtDir = path.join(runDir, "worktrees", `agent-${agentId}`);
-  const branch = `wf-agent-${agentId}`;
-  try {
-    execFileSync("git", ["worktree", "add", "--detach", "-b", branch, wtDir], {
-      cwd: repoCwd,
-      stdio: "ignore",
-    });
-    return wtDir;
-  } catch (err) {
-    console.warn(`[hooks] isolation:"worktree" failed for agent ${agentId}: ${String(err)} — using cwd`);
-    return null;
-  }
+  execFileSync("git", ["worktree", "add", "--detach", wtDir], {
+    cwd: repoCwd,
+    stdio: "ignore",
+  });
+  return wtDir;
 }
 
 // Remove the worktree iff it has no uncommitted changes (`git status --porcelain` empty).
@@ -158,7 +154,7 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
       let cwd = ctx.cwd;
       if (o.isolation === "worktree") {
         worktreeDir = createWorktree(ctx.cwd, ctx.runDir, id);
-        if (worktreeDir !== null) cwd = worktreeDir;
+        cwd = worktreeDir;
       }
 
       const resolvedModel = o.model ?? ctx.defaultModel;
