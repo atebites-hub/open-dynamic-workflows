@@ -146,7 +146,7 @@ async function main(): Promise<void> {
     process.stderr.write(
       `\n[done] run=${res.runId} agents=${res.agentCount} tokens=${res.tokensSpent} ${res.durationMs}ms\n`,
     );
-    process.exit(0);
+    process.exit(res.ok ? 0 : 1);
   } catch (e) {
     tree.stop();
     if (controller.signal.aborted) {

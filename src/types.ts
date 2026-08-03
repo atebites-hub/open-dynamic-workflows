@@ -259,6 +259,12 @@ export interface WorkflowResult {
   tokensSpent: number;
   agentCount: number;
   durationMs: number;
+  /** True only when the run completed without failed agent or workflow events. */
+  ok: boolean;
+  /** Number of failed agent_end events, including failures swallowed by parallel(). */
+  failedAgents: number;
+  /** Number of failed nested workflow_end events. */
+  failedWorkflows: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

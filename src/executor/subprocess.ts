@@ -66,6 +66,7 @@ export interface SubprocessSpec {
   prepare: (opts: ExecOptions) => Promise<{
     args: string[];
     stdin?: string;
+    env?: Record<string, string>;
     cleanup?: () => void | Promise<void>;
   }>;
   /** Parse one stdout line into an event object, or null to skip it. */
@@ -168,7 +169,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
       // prepare() 是异步的（可能写临时文件）；之后才 spawn。
       void spec
         .prepare(opts)
-        .then(({ args, stdin, cleanup }) => {
+        .then(({ args, stdin, env, cleanup }) => {
           cleanupFn = cleanup;
 
           // If the signal already aborted while prepare() was in flight, bail before spawning.
@@ -183,7 +184,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           dbg(`spawn: ${spec.command} ${args.join(" ")} (cwd=${opts.cwd})`);
           const child = spawn(spec.command, args, {
             cwd: opts.cwd,
-            env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...opts.env },
+            env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...opts.env, ...env },
             stdio: ["pipe", "pipe", "pipe"],
             // New process group: the CLI may spawn its own children (MCP servers, tool
             // 新建进程组：CLI 可能派生它自己的子进程（MCP server、工具

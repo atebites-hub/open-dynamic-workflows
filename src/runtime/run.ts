@@ -123,15 +123,21 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
   // Run-level output-token tally — pure observability (reported as tokensSpent), no ceiling.
   // run 级输出 token 计数 —— 纯观测（作为 tokensSpent 上报），不设上限。
   let tokensSpent = 0;
+  let failedAgents = 0;
+  let failedWorkflows = 0;
   const abort = new AbortController();
+  const onExternalAbort = (): void => abort.abort();
 
   // Forward external cancellation (RunOptions.signal) into the run's shared abort, which
   // 把外部取消信号（RunOptions.signal）转发到本次运行的共享 abort，
   // is what the executor watches to kill in-flight subprocesses.
   // 而 executor 正是监听这个 abort 来终止进行中的子进程。
   if (options.signal) {
-    if (options.signal.aborted) abort.abort();
-    else options.signal.addEventListener("abort", () => abort.abort(), { once: true });
+    if (options.signal.aborted) {
+      abort.abort();
+      throw new Error("workflow aborted before start");
+    }
+    options.signal.addEventListener("abort", onExternalAbort, { once: true });
   }
 
   // (6) Event sink: accumulate + fan out to onEvent.
@@ -193,10 +199,16 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       const name = typeof ref === "string" ? ref : ref.scriptPath;
 
       emit({ type: "workflow_start", name, ts: now() });
+      let childOk = false;
       try {
-        return await runInternal(childSource, a, depth + 1);
+        const childValue = await runInternal(childSource, a, depth + 1);
+        childOk = true;
+        return childValue;
+      } catch (error) {
+        failedWorkflows += 1;
+        throw error;
       } finally {
-        emit({ type: "workflow_end", name, ok: true, ts: now() });
+        emit({ type: "workflow_end", name, ok: childOk, ts: now() });
       }
     };
 
@@ -225,10 +237,20 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       ts: now(),
     });
     await journal.close();
+    if (options.signal) options.signal.removeEventListener("abort", onExternalAbort);
     throw err;
   }
 
   const durationMs = Date.now() - startedAt;
+  failedAgents = events.filter(
+    (event): event is Extract<ProgressEvent, { type: "agent_end" }> =>
+      event.type === "agent_end" && !event.ok,
+  ).length;
+  failedWorkflows = events.filter(
+    (event): event is Extract<ProgressEvent, { type: "workflow_end" }> =>
+      event.type === "workflow_end" && !event.ok,
+  ).length;
+  ok = failedAgents === 0 && failedWorkflows === 0;
   emit({
     type: "run_end",
     runId: journal.runId,
@@ -238,6 +260,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     ts: now(),
   });
   await journal.close();
+  if (options.signal) options.signal.removeEventListener("abort", onExternalAbort);
 
   return {
     runId: journal.runId,
@@ -248,5 +271,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     tokensSpent: tokensSpent,
     agentCount: counter.count,
     durationMs,
+    ok,
+    failedAgents,
+    failedWorkflows,
   };
 }
