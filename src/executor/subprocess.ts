@@ -42,6 +42,7 @@ export interface ExecResultCore {
   resultSubtype: ResultSubtype;
   isError: boolean;
   usage: TokenUsage;
+  telemetryAvailable?: boolean;
 }
 
 /**
@@ -329,6 +330,9 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
                 resultSubtype: core.resultSubtype,
                 isError: core.isError,
                 usage: core.usage,
+                ...(core.telemetryAvailable === undefined
+                  ? {}
+                  : { telemetryAvailable: core.telemetryAvailable }),
               };
               if (core.structuredOutput !== undefined) {
                 result.structuredOutput = core.structuredOutput;

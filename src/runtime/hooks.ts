@@ -116,7 +116,13 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
     // 把回退建模为 Partial，使「缺 executor」分支可达且能通过类型检查（此时 o.executor 为 string | undefined）。
     const o: Partial<AgentOptions> = opts ?? {};
     const key = keyFor(prompt, o);
-    const id = ctx.nextAgentId();
+    let id: number;
+    try {
+      id = ctx.nextAgentId();
+    } catch (error) {
+      ctx.noteAgentFailure();
+      throw error;
+    }
     const label = o.label ?? prompt.slice(0, 60);
     const phase = o.phase ?? ctx.currentPhase.value;
 

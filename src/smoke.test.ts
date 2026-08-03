@@ -244,6 +244,35 @@ return 'unreachable';
 //     agent_start、agent_end、run_end。
 // ────────────────────────────────────────────────────────────────────────────
 
+test("(h2) concurrency queues 500 agents at the configured limit", async () => {
+  let active = 0;
+  let peak = 0;
+  let completed = 0;
+  const executor: Executor = async ({ prompt }) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    active -= 1;
+    completed += 1;
+    return makeFakeResult({ prompt, cwd: "/tmp" });
+  };
+  const script = `${META}
+const results = await parallel(Array.from({ length: 500 }, (_, i) => () => agent('queued ' + i, { executor: 'fake' })));
+return results;
+`;
+  const res = await runWorkflow(opts("h2", script, { executors: { fake: executor }, concurrency: 6 }));
+
+  assert.ok(Array.isArray(res.value));
+  const values = res.value as unknown[];
+  assert.equal(values.length, 500);
+  assert.equal(values[0], "FAKE:queued 0");
+  assert.equal(values[499], "FAKE:queued 499");
+  assert.equal(res.agentCount, 500);
+  assert.equal(res.ok, true);
+  assert.equal(completed, 500);
+  assert.equal(peak, 6);
+});
+
 test("(h) WorkflowResult shape + event lifecycle (run_start/agent_start/agent_end/run_end)", async () => {
   const script = `${META}
 const t = await agent('one agent for the lifecycle', { executor: 'fake' });
@@ -254,6 +283,9 @@ return t;
   assert.equal(typeof res.runId, "string");
   assert.ok(res.runId.length > 0);
   assert.equal(res.value, "FAKE:one agent for the li");
+  assert.equal(res.ok, true);
+  assert.equal(res.durable, true);
+  assert.deepEqual(res.journalErrors, []);
   assert.ok(Array.isArray(res.events));
 
   const types = res.events.map((e) => e.type);
@@ -593,6 +625,16 @@ test("(q) default layout groups a run under .odw/<name>/runs/<runId>", async () 
 //     so a usage-limit / auth death reads as a real message in the error + agent_end.
 //     这样配额/认证导致的失败在 error 和 agent_end 里都是一句真实消息。
 // ────────────────────────────────────────────────────────────────────────────
+
+test("(s2) agent cap failures mark a swallowed parallel run as failed", async () => {
+  const script = `${META}
+return (await parallel(Array.from({ length: 1001 }, (_, i) => () => agent('cap ' + i, { executor: 'fake' })))).filter(Boolean).length;
+`;
+  const res = await runWorkflow(opts("s2", script, { executors: { fake: fakeExecutor }, concurrency: 6 }));
+  assert.equal(res.ok, false);
+  assert.equal(res.failedAgents, 1);
+  assert.equal(res.agentCount, 1000);
+});
 
 test("(s) swallowed parallel failures mark the workflow result as failed", async () => {
   const failing: Executor = async () => ({

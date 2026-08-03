@@ -124,7 +124,10 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
   // run 级输出 token 计数 —— 纯观测（作为 tokensSpent 上报），不设上限。
   let tokensSpent = 0;
   let failedAgents = 0;
+  let admissionFailures = 0;
   let failedWorkflows = 0;
+  let durable = true;
+  let journalErrors: string[] = [];
   const abort = new AbortController();
   const onExternalAbort = (): void => abort.abort();
 
@@ -174,6 +177,9 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       abort: abort.signal,
       currentPhase: { value: null },
       nextAgentId: () => counter.next(),
+      noteAgentFailure: () => {
+        admissionFailures += 1;
+      },
       takeCached: (k) => journal.takeCached(k),
       record: (r) => journal.append(r),
       addTokens: (n) => {
@@ -236,13 +242,15 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       durationMs,
       ts: now(),
     });
-    await journal.close();
+    const journalResult = await journal.close();
+    durable = journalResult.durable;
+    journalErrors = journalResult.errors;
     if (options.signal) options.signal.removeEventListener("abort", onExternalAbort);
     throw err;
   }
 
   const durationMs = Date.now() - startedAt;
-  failedAgents = events.filter(
+  failedAgents = admissionFailures + events.filter(
     (event): event is Extract<ProgressEvent, { type: "agent_end" }> =>
       event.type === "agent_end" && !event.ok,
   ).length;
@@ -259,7 +267,10 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     durationMs,
     ts: now(),
   });
-  await journal.close();
+  const journalResult = await journal.close();
+  durable = journalResult.durable;
+  journalErrors = journalResult.errors;
+  ok = ok && durable;
   if (options.signal) options.signal.removeEventListener("abort", onExternalAbort);
 
   return {
@@ -274,5 +285,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     ok,
     failedAgents,
     failedWorkflows,
+    durable,
+    journalErrors,
   };
 }
