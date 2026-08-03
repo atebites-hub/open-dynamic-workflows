@@ -377,6 +377,8 @@ test("(k) resume replays cached agent results with zero spend on the second run"
   const r1 = await runWorkflow({ script, executors: { fake: countingExecutor }, runDir: baseDir });
   assert.equal(calls, 2, "first run spawns both agents");
   assert.equal(r1.tokensSpent, 10, "first run spends 2 × 5 output tokens");
+  assert.equal(r1.ok, true);
+  assert.equal(r1.failedAgents, 0);
 
   const callsAfterFirst = calls;
   const r2 = await runWorkflow({
@@ -591,6 +593,23 @@ test("(q) default layout groups a run under .odw/<name>/runs/<runId>", async () 
 //     so a usage-limit / auth death reads as a real message in the error + agent_end.
 //     这样配额/认证导致的失败在 error 和 agent_end 里都是一句真实消息。
 // ────────────────────────────────────────────────────────────────────────────
+
+test("(s) swallowed parallel failures mark the workflow result as failed", async () => {
+  const failing: Executor = async () => ({
+    text: "boom",
+    sessionId: null,
+    costUsd: 0,
+    durationMs: 1,
+    resultSubtype: "error_during_execution",
+    isError: true,
+    usage: { inputTokens: 0, outputTokens: 0 },
+  });
+  const script = `${META}\nreturn await parallel([() => agent('bad', { executor: 'fake' })]);\n`;
+  const result = await runWorkflow({ script, executors: { fake: failing }, runDir: uniqueRunDir("s") });
+  assert.equal(result.ok, false);
+  assert.equal(result.failedAgents, 1);
+  assert.equal(result.events.some((event) => event.type === "run_end" && !event.ok), true);
+});
 
 test("(r) a failing agent surfaces the executor's reason in the error + agent_end event", async () => {
   const failing: Executor = async () => ({
