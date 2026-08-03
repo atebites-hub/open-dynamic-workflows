@@ -3,8 +3,8 @@
 // and resume-with-caching cache lookup. See SPEC §9.
 // 以及带缓存复用的 resume 缓存查找。详见 SPEC §9。
 //
-// Invariant 8: journal write failures WARN, never throw.
-// 不变量 8：journal 写盘失败只 WARN，绝不 throw。
+// Journal write failures are recorded and WARN, never throw into the workflow.
+// journal 写盘失败会记录并 WARN，不会抛入 workflow。
 
 import { createHash, randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -41,16 +41,20 @@ export function keyFor(prompt: string, opts: unknown): string {
 // 日志（Journal）
 // ────────────────────────────────────────────────────────────────────────────
 
+export interface JournalCloseResult {
+  durable: boolean;
+  errors: string[];
+}
+
 export interface Journal {
   runId: string;
   runDir: string;
   persistScript(source: string, ext: string): Promise<string>;
   append(rec: AgentRecord): void;
-  /** Append one ProgressEvent to runDir/events.jsonl (SPEC §10). Warn-never-throw. */
-  /** 向 runDir/events.jsonl 追加一条 ProgressEvent（SPEC §10）。只 warn，绝不 throw。 */
+  /** Append one ProgressEvent to runDir/events.jsonl (SPEC §10). */
   appendEvent(event: unknown): void;
   takeCached(key: string): AgentRecord | undefined;
-  close(): Promise<void>;
+  close(): Promise<JournalCloseResult>;
 }
 
 function makeRunId(): string {
@@ -95,6 +99,7 @@ export async function openJournal(params: {
   const agentsDir = path.join(runDir, "agents");
   const journalPath = path.join(runDir, "journal.jsonl");
   const eventsPath = path.join(runDir, "events.jsonl");
+  const statusPath = path.join(runDir, "journal-status.json");
 
   await mkdir(agentsDir, { recursive: true });
 
@@ -112,6 +117,12 @@ export async function openJournal(params: {
   // 每个文件各自的串行追加链 —— 保证同一文件内的行不会交错。
   let appendChain: Promise<void> = Promise.resolve();
   let eventChain: Promise<void> = Promise.resolve();
+  const errors: string[] = [];
+  const recordError = (kind: string, err: unknown): void => {
+    const message = `[journal] ${kind} failed: ${String(err)}`;
+    errors.push(message);
+    console.warn(message);
+  };
 
   const journal: Journal = {
     runId,
@@ -121,9 +132,7 @@ export async function openJournal(params: {
       try {
         await writeFile(scriptPath, source, "utf8");
       } catch (err) {
-        // Invariant 8: never throw on a journal disk write.
-        // 不变量 8：journal 写盘时绝不 throw。
-        console.warn(`[journal] persistScript failed: ${String(err)}`);
+        recordError("persistScript", err);
       }
       return scriptPath;
     },
@@ -134,7 +143,7 @@ export async function openJournal(params: {
         try {
           await appendFile(journalPath, line, "utf8");
         } catch (err) {
-          console.warn(`[journal] append failed: ${String(err)}`);
+          recordError("append", err);
         }
       });
     },
@@ -144,7 +153,7 @@ export async function openJournal(params: {
         try {
           await appendFile(eventsPath, line, "utf8");
         } catch (err) {
-          console.warn(`[journal] event append failed: ${String(err)}`);
+          recordError("event append", err);
         }
       });
     },
@@ -153,9 +162,18 @@ export async function openJournal(params: {
       if (queue === undefined || queue.length === 0) return undefined;
       return queue.shift();
     },
-    async close(): Promise<void> {
+    async close(): Promise<JournalCloseResult> {
       await appendChain;
       await eventChain;
+      const result = { durable: errors.length === 0, errors: [...errors] };
+      try {
+        await writeFile(statusPath, `${JSON.stringify(result)}\n`, "utf8");
+      } catch (err) {
+        recordError("status write", err);
+        result.durable = false;
+        result.errors = [...errors];
+      }
+      return result;
     },
   };
 

@@ -147,6 +147,8 @@ export interface ExecResult {
   resultSubtype: ResultSubtype;
   isError: boolean;
   usage: TokenUsage;
+  /** Whether usage/session values came from a verified machine-readable source. */
+  telemetryAvailable?: boolean;
 }
 
 /** The executor function signature; the only thing that touches `claude`. */
@@ -259,6 +261,16 @@ export interface WorkflowResult {
   tokensSpent: number;
   agentCount: number;
   durationMs: number;
+  /** True only when the run completed without failed agent or workflow events. */
+  ok: boolean;
+  /** Number of failed agent_end events, including failures swallowed by parallel(). */
+  failedAgents: number;
+  /** Number of failed nested workflow_end events. */
+  failedWorkflows: number;
+  /** False when any required journal write failed. */
+  durable: boolean;
+  /** Journal write diagnostics, safe to expose without credentials. */
+  journalErrors: string[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -290,6 +302,9 @@ export interface RunContext {
   /** Monotonic agent id allocator + 1000 cap enforcement. */
   /** 单调递增的 agent id 分配器 + 强制 1000 上限。 */
   nextAgentId(): number;
+  /** Record an agent admission failure that occurred before an id/event existed. */
+  /** 记录在分配 id/事件之前发生的 agent 准入失败。 */
+  noteAgentFailure(): void;
   /** Resume cache lookup by content key; returns the cached record or undefined. */
   /** 按内容 key 查找恢复缓存；返回缓存的 record 或 undefined。 */
   takeCached(key: string): AgentRecord | undefined;
