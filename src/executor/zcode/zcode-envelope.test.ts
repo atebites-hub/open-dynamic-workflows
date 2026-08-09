@@ -50,6 +50,7 @@ function envelope(over: Partial<ZcodeResultEnvelope> = {}): string {
     costUsd: null,
     inputTokens: null,
     outputTokens: null,
+    totalTokens: null,
     telemetryAvailable: false,
     ...over,
   } satisfies ZcodeResultEnvelope);
@@ -128,6 +129,38 @@ test("(3) schema: non-JSON text → parse failure flags isError, never throws", 
   // The un-parseable text is preserved for diagnostics.
   // 不可解析的文本仍被保留，便于排查。
   assert.equal(outcome.text, "not json at all");
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// (3b) schema: JSON wrapped in prose / markdown fences still parses (Bug 1).
+//      Models without a native --json-schema flag (zcode) often emit
+//      "Here is the result:\n```json {...} ```" — a bare JSON.parse would throw
+//      and waste the agent. The extractor recovers the {...} object.
+// (3b) schema：被散文/markdown 围栏包裹的 JSON 仍可解析（Bug 1）。
+//      没有原生 --json-schema flag 的 CLI（zcode）常常输出
+//      "Here is the result:\n```json {...} ```" —— 裸 JSON.parse 会抛出、浪费整个 agent。
+//      提取器把 {...} 对象恢复出来。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(3b) schema: prose + ```json fence around the object still parses", () => {
+  const wrapped =
+    'I have finished reading the file. Returning the review.\n' +
+    '```json\n{"lens":"rendering","issues":[],"shipReady":true}\n' +
+    "```\nLet me know if you need more.";
+  const events = eventsFromLines([envelope({ text: wrapped, exitCode: 0 })]);
+
+  const outcome = reduceZcodeEnvelope(events, { schema: true });
+
+  assert.equal(outcome.isError, false);
+  assert.equal(outcome.resultSubtype, "success");
+  assert.deepEqual(outcome.structuredOutput, {
+    lens: "rendering",
+    issues: [],
+    shipReady: true,
+  });
+  // The original (wrapped) text is preserved on `text` for diagnostics.
+  // 原始（被包裹的）文本仍保留在 `text` 上，便于排查。
+  assert.equal(outcome.text, wrapped);
 });
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -258,4 +291,51 @@ test("(8) telemetry present → usage/cost/telemetryAvailable round-trip", () =>
   assert.equal(outcome.telemetryAvailable, true);
   assert.equal(outcome.sessionId, "sess_abc");
   assert.equal(outcome.isError, false);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// (8b) Bug 5: when the envelope carries only a total (no input/output split), the reducer
+//      falls back to the total so tokensSpent is non-zero. The runtime footer's per-turn usage
+//      is sometimes absent (depends on the model); the projection total is always present.
+// (8b) Bug 5：当信封只带总数（无 input/output 拆分）时，reducer 回退到总数，使 tokensSpent 非零。
+//      运行时尾行的单轮 usage 有时缺失（取决于模型）；projection 的总数始终存在。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(8b) Bug 5: totalTokens-only envelope falls back to the total for input/output", () => {
+  const events = eventsFromLines([
+    envelope({
+      text: "done",
+      exitCode: 0,
+      totalTokens: 2000,
+      telemetryAvailable: true,
+      sessionId: "sess_t",
+    }),
+  ]);
+
+  const outcome = reduceZcodeEnvelope(events);
+  // No split provided → both fall back to the total (so the run reports non-zero spend).
+  // 未提供拆分 → 两者都回退到总数（使 run 上报非零花销）。
+  assert.equal(outcome.usage.inputTokens, 2000);
+  assert.equal(outcome.usage.outputTokens, 2000);
+  assert.equal(outcome.telemetryAvailable, true);
+  assert.equal(outcome.sessionId, "sess_t");
+});
+
+test("(8c) Bug 5: explicit input/output split takes precedence over totalTokens", () => {
+  const events = eventsFromLines([
+    envelope({
+      text: "done",
+      exitCode: 0,
+      inputTokens: 1800,
+      outputTokens: 200,
+      totalTokens: 2000,
+      telemetryAvailable: true,
+    }),
+  ]);
+
+  const outcome = reduceZcodeEnvelope(events);
+  // Split is present → use it exactly; the total is ignored for usage mapping.
+  // 拆分存在 → 精确使用它；总数在 usage 映射中被忽略。
+  assert.equal(outcome.usage.inputTokens, 1800);
+  assert.equal(outcome.usage.outputTokens, 200);
 });

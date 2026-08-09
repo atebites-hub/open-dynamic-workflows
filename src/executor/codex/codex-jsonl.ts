@@ -3,6 +3,8 @@
 // (one JSON object per line). No I/O, no subprocess; just parse + fold.
 // （每行一个 JSON 对象）。无 I/O、无子进程；只做解析 + 折叠。
 
+import { extractJsonObject } from "../../schema/extract-json.js";
+
 /** Folded outcome of a codex JSONL event sequence. */
 /** 一段 codex JSONL 事件序列折叠后的结果。 */
 export interface CodexOutcome {
@@ -140,12 +142,17 @@ export function reduceCodexEvents(
     sawTurnFailed ||
     (exitCode != null && exitCode !== 0);
 
-  // When structured output is requested, parse the agent text as JSON. A parse
-  // failure is an error (flag it, don't throw).
-  // 请求结构化输出时，把 agent 文本当 JSON 解析。解析失败视为错误（标记，不抛）。
+  // When structured output is requested, parse the agent text as JSON. Models often wrap the
+  // JSON in prose or markdown fences, so extract the first balanced {...} object before parsing
+  // (a bare JSON.parse would throw on "Here is the result: {…}"). A parse failure is still an
+  // error (flag it, don't throw).
+  // 请求结构化输出时，把 agent 文本当 JSON 解析。模型常常把 JSON 包在散文或 markdown 围栏里，
+  // 因此解析前先提取第一个平衡的 {...} 对象（裸 JSON.parse 在 "Here is the result: {…}" 上会抛）。
+  // 解析失败仍视为错误（标记，不抛）。
   if (opts?.schema) {
+    const candidate = extractJsonObject(outcome.text) ?? outcome.text;
     try {
-      outcome.structuredOutput = JSON.parse(outcome.text);
+      outcome.structuredOutput = JSON.parse(candidate);
     } catch {
       isError = true;
     }

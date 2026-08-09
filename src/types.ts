@@ -61,6 +61,15 @@ export interface AgentOptions {
   /** Named subagent system-prompt preset. */
   /** 命名的子 agent system-prompt 预设。 */
   agentType?: string;
+  /**
+   * Per-agent override of the run-wide retry budget for transient (error_during_execution)
+   * failures. Set to 0 to disable retry for this agent; set higher for a known-flaky node. Overrides
+   * RunOptions.maxRetries. See src/runtime/retry.ts.
+   *
+   * 针对瞬时（error_during_execution）失败的、按 agent 覆盖的重试预算。设为 0 可对该 agent
+   * 关闭重试；对已知不稳的节点可调高。覆盖 RunOptions.maxRetries。见 src/runtime/retry.ts。
+   */
+  retries?: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -190,7 +199,23 @@ export type ProgressEvent =
   | { type: "log"; message: string; phase: string | null; ts: string }
   | { type: "workflow_start"; name: string; ts: string }
   | { type: "workflow_end"; name: string; ok: boolean; ts: string }
-  | { type: "run_end"; runId: string; ok: boolean; tokensSpent: number; durationMs: number; ts: string };
+  | {
+      type: "run_end";
+      runId: string;
+      ok: boolean;
+      tokensSpent: number;
+      durationMs: number;
+      ts: string;
+      // Advisory per-agent/workflow failure counts (Bug 2): `ok` reflects whether the script
+      // completed and returned a value, so a fault-tolerant workflow that swallows an agent
+      // failure via parallel()→null can still be ok:true. These counts let consumers report
+      // "ok (N failed)" rather than hiding the partial failures. 0 when the script threw.
+      // 通告性的 per-agent/workflow 失败计数（Bug 2）：`ok` 反映脚本是否完成并返回了值，
+      // 因此通过 parallel()→null 吞掉 agent 失败的容错型 workflow 仍可为 ok:true。
+      // 这些计数让消费方能报告 "ok (N failed)"，而不是隐藏部分失败。脚本抛出时为 0。
+      failedAgents?: number;
+      failedWorkflows?: number;
+    };
 
 export type EventSink = (event: ProgressEvent) => void;
 
@@ -237,6 +262,22 @@ export interface RunOptions {
   /** Per-agent default timeout. */
   /** 每个 agent 的默认超时。 */
   agentTimeoutMs?: number;
+  /**
+   * Run-wide default for transient-failure retries. When an agent's executor returns
+   * `error_during_execution` (a transient CLI crash / "Turn execution failed" / network blip), the
+   * runtime retries up to this many EXTRA attempts with exponential backoff before giving up.
+   * Permanent failures (schema validation, exhausted turn budget) are never retried. Default 2.
+   * Per-agent override: AgentOptions.retries. See src/runtime/retry.ts.
+   *
+   * 瞬时失败重试的运行级默认值。当某个 agent 的 executor 返回 error_during_execution（瞬时 CLI
+   * 崩溃 / "Turn execution failed" / 网络抖动）时，运行时最多再额外重试这么多次（指数退避）后放弃。
+   * 永久性失败（schema 校验、轮数耗尽）永不重试。默认 2。按 agent 覆盖：AgentOptions.retries。
+   * 见 src/runtime/retry.ts。
+   */
+  maxRetries?: number;
+  /** Base delay (ms) for retry backoff; attempt N waits `baseMs * 2^(N-1)` capped at 8×. Default 1000. */
+  /** 重试退避的基础延迟（毫秒）；第 N 次尝试等待 `baseMs * 2^(N-1)`，上限 8×。默认 1000。 */
+  retryBackoffMs?: number;
   /**
    * External cancellation. When it aborts, in-flight agent subprocesses are killed
    * 外部取消。当它中止时，正在执行的 agent 子进程会被杀掉
@@ -288,6 +329,12 @@ export interface RunContext {
   /** 命名 executor 注册表；agent() 用 AgentOptions.executor 对照此 map 解析。 */
   executors: Record<string, Executor>;
   agentTimeoutMs?: number;
+  /** Run-wide default retry budget for transient (error_during_execution) failures. */
+  /** 瞬时（error_during_execution）失败的运行级默认重试预算。 */
+  maxRetries?: number;
+  /** Base delay (ms) for retry backoff. */
+  /** 重试退避的基础延迟（毫秒）。 */
+  retryBackoffMs?: number;
   /** Concurrency cap. */
   /** 并发上限。 */
   concurrency: number;

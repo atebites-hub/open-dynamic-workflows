@@ -84,8 +84,19 @@ export function formatEvent(e: ProgressEvent): string {
       return `[workflow] ▸ ${e.name}`;
     case "workflow_end":
       return `[workflow] ${e.ok ? "done" : "failed"} ▸ ${e.name}`;
-    case "run_end":
-      return `[run] end ${e.runId} — ${e.ok ? "ok" : "failed"} · ${e.tokensSpent} tok · ${fmtDuration(e.durationMs)}`;
+    case "run_end": {
+      // Bug 2: ok reflects "script returned a value", not "zero agent failures". When ok but
+      // some agents/workflows failed (swallowed by parallel()→null), surface them as "ok (N
+      // failed)" instead of hiding the partial failure. "failed" stays reserved for a thrown run.
+      // Bug 2：ok 表示「脚本返回了值」，而非「零 agent 失败」。当 ok 但有 agent/workflow 失败
+      // （被 parallel()→null 吞掉）时，显示为 "ok (N failed)" 而非隐藏部分失败。
+      // "failed" 仍专用于抛出（未完成）的运行。
+      const advisory =
+        (e.failedAgents ?? 0) + (e.failedWorkflows ?? 0) > 0
+          ? ` (${(e.failedAgents ?? 0) + (e.failedWorkflows ?? 0)} failed)`
+          : "";
+      return `[run] end ${e.runId} — ${e.ok ? `ok${advisory}` : "failed"} · ${e.tokensSpent} tok · ${fmtDuration(e.durationMs)}`;
+    }
     default: {
       // exhaustiveness guard: unknown event ⇒ best-effort JSON
       // 穷尽性兜底：未知事件 ⇒ 尽力序列化成 JSON
