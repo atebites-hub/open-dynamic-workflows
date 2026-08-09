@@ -13,8 +13,8 @@ reimplementation of the same model (fan a deterministic script out across many s
 without those limits:
 
 - **Any model.** Every `agent()` chooses its `Executor` by name. Bundled adapters drive
-  `claude --print` and `codex exec` — different nodes can run on different CLIs — and you can
-  plug in any other model, API, or backend. No lock-in.
+  `claude --print`, `codex exec`, and `zcode --prompt` — different nodes can run on different
+  CLIs — and you can plug in any other model, API, or backend. No lock-in.
 - **Shipped as a skill + a CLI.** Not a feature buried in one product. The skill teaches an
   agent to *write* workflows; the CLI *runs* them. Plain, portable open source.
 - **Drops into any coding agent.** Since it's just a skill + a CLI, wire it into whatever you
@@ -36,16 +36,19 @@ You can also invoke `/open-dynamic-workflows` explicitly to have the agent only 
 ```
 src/
 ├── types.ts              ← frozen shared contract — every module codes against it
-├── index.ts              ← public API: runWorkflow + claudeExecutor / codexExecutor + builtinExecutors + types
+├── index.ts              ← public API: runWorkflow + claudeExecutor / codexExecutor / zcodeExecutor + builtinExecutors + types
 ├── cli.ts                ← CLI entry: argv → runWorkflow → live tree
 ├── executor/             ← one subfolder per CLI; subprocess.ts is the shared, CLI-agnostic driver
 │   ├── subprocess.ts     ← spawn · process-group kill · wall/idle/abort watchdogs · line buffering · ExecTrace
 │   ├── claude/
 │   │   ├── claude.ts     ← spawn `claude --print` — the only place that touches claude
 │   │   └── stream-json.ts ← claude stream-json event reducer (pure)
-│   └── codex/
-│       ├── codex.ts      ← spawn `codex exec --json` — the only place that touches codex
-│       └── codex-jsonl.ts ← codex JSONL event reducer (pure)
+│   ├── codex/
+│   │   ├── codex.ts      ← spawn `codex exec --json` — the only place that touches codex
+│   │   └── codex-jsonl.ts ← codex JSONL event reducer (pure)
+│   └── zcode/
+│       ├── zcode.ts      ← spawn `zcode --prompt` (ZCODE_ODW_PROTOCOL=1) — the only place that touches zcode
+│       └── zcode-envelope.ts ← zcode ODW envelope (single zcode_result JSON) reducer (pure)
 ├── schema/validate.ts    ← ajv + `--json-schema` building + root-`object` guard
 ├── runtime/
 │   ├── semaphore.ts      ← concurrency cap (min(16, cpus-2)) + 1000-agent backstop + abort
@@ -62,7 +65,7 @@ src/
 npm install
 npm run build        # tsc → dist/
 npm run typecheck    # tsc --noEmit (strict)
-npm run smoke        # all tests — zero tokens, no real model CLI (claude/codex)
+npm run smoke        # all tests — zero tokens, no real model CLI (claude/codex/zcode)
 ```
 
 ## Sibling projects
