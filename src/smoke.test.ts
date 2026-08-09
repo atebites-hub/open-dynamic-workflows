@@ -143,6 +143,59 @@ return out;
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// (c2) Bug 2: a workflow that swallows a failed agent (parallel()→null + filter)
+//      and returns a value is OK — failedAgents is advisory, not run-fatal. Before the fix,
+//      any agent_end{ok:false} flipped run `ok` to false and the CLI exited 1 despite a
+//      usable result.
+// (c2) Bug 2：吞掉失败 agent（parallel()→null + 过滤）并返回值的 workflow 是 OK 的
+//      —— failedAgents 是通告性的，不让整个 run 失败。修复前，任何 agent_end{ok:false}
+//      都会把 run 的 `ok` 翻成 false，CLI 以 1 退出，尽管结果可用。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(c2) Bug 2: a swallowed agent failure leaves the run ok:true with failedAgents:1", async () => {
+  const script = `${META}
+// One agent throws an ExecResult isError (the real failure path the runtime sees),
+// parallel() resolves it to null, the script filters and returns a value.
+const out = await parallel([
+  async () => await agent('the good one', { executor: 'fake' }),
+  async () => await agent('boom', { executor: 'failing' }),
+]);
+return out.filter(Boolean);
+`;
+  // A second executor that returns an error ExecResult (mirrors what hooks.ts treats as a
+  // failed agent: res.isError && resultSubtype !== "success" → throws inside agent()).
+  // 第二个 executor 返回一个 isError 的 ExecResult（对应 hooks.ts 视作失败 agent 的路径：
+  // res.isError && resultSubtype !== "success" → 在 agent() 内抛出）。
+  const failing: Executor = async () => ({
+    text: "",
+    sessionId: null,
+    costUsd: 0,
+    durationMs: 1,
+    resultSubtype: "error_during_execution",
+    isError: true,
+    usage: { inputTokens: 0, outputTokens: 0 },
+  });
+  const res = await runWorkflow({
+    ...opts("c2", script),
+    executors: { fake: fakeExecutor, failing },
+    maxRetries: 0,
+  });
+
+  // The script returned a filtered array with just the good agent's value.
+  // 脚本返回了过滤后的数组，只含成功 agent 的值。
+  const value = res.value as unknown[];
+  assert.deepEqual(value, ["FAKE:the good one"]);
+  // Bug 2: the run SUCCEEDED (returned a value) despite one agent failing.
+  // Bug 2：尽管有一个 agent 失败，run 仍然成功（返回了值）。
+  assert.equal(res.ok, true);
+  assert.equal(res.failedAgents, 1);
+  // The run_end event carries the advisory counts so labels can show "ok (1 failed)".
+  // run_end 事件携带通告性计数，使标签能显示 "ok (1 failed)"。
+  const runEnd = res.events.find((e) => e.type === "run_end");
+  assert.equal(runEnd?.type === "run_end" ? runEnd.failedAgents : undefined, 1);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // (d) pipeline([1,2,3], s1, s2) maps correctly; a throwing stage → null at that
 // (d) pipeline([1,2,3], s1, s2) 正确映射；某个阶段抛错 → 该位置变为 null，
 //     position while the other items still succeed.
@@ -646,17 +699,28 @@ test("(q) default layout groups a run under .odw/<name>/runs/<runId>", async () 
 //     这样配额/认证导致的失败在 error 和 agent_end 里都是一句真实消息。
 // ────────────────────────────────────────────────────────────────────────────
 
-test("(s2) agent cap failures mark a swallowed parallel run as failed", async () => {
+test("(s2) agent cap failures are advisory when the script swallows them (Bug 2)", async () => {
+  // 1001 agents with a concurrency cap of 6 → the overflow is refused (admission failure), the
+  // script filters past the null and returns a count. The run COMPLETED and returned a value, so
+  // Bug 2: ok is true; the 1 admission failure is surfaced as failedAgents advisory metadata.
+  // 1001 个 agent、并发上限 6 → 超出的被拒（准入失败），脚本过滤掉 null 并返回计数。
+  // run 完成并返回了值，故 Bug 2：ok 为 true；那 1 个准入失败作为 failedAgents 通告性元数据带出。
   const script = `${META}
 return (await parallel(Array.from({ length: 1001 }, (_, i) => () => agent('cap ' + i, { executor: 'fake' })))).filter(Boolean).length;
 `;
   const res = await runWorkflow(opts("s2", script, { executors: { fake: fakeExecutor }, concurrency: 6 }));
-  assert.equal(res.ok, false);
+  assert.equal(res.ok, true);
   assert.equal(res.failedAgents, 1);
   assert.equal(res.agentCount, 1000);
 });
 
-test("(s) swallowed parallel failures mark the workflow result as failed", async () => {
+test("(s) swallowed parallel failures are advisory, not run-fatal (Bug 2)", async () => {
+  // A failing executor inside parallel() resolves to null; the script returns [null] and thus
+  // completes. Bug 2: ok is true with failedAgents:1 (previously this was ok:false — a usable
+  // return value was mislabeled "failed" because one agent errored).
+  // 失败的 executor 在 parallel() 内 resolve 成 null；脚本返回 [null]，因此完成。
+  // Bug 2：ok 为 true、failedAgents:1（此前为 ok:false —— 仅仅因为一个 agent 出错，就把可用的
+  // 返回值误标成 "failed"）。
   const failing: Executor = async () => ({
     text: "boom",
     sessionId: null,
@@ -667,10 +731,14 @@ test("(s) swallowed parallel failures mark the workflow result as failed", async
     usage: { inputTokens: 0, outputTokens: 0 },
   });
   const script = `${META}\nreturn await parallel([() => agent('bad', { executor: 'fake' })]);\n`;
-  const result = await runWorkflow({ script, executors: { fake: failing }, runDir: uniqueRunDir("s") });
-  assert.equal(result.ok, false);
+  const result = await runWorkflow({ script, executors: { fake: failing }, runDir: uniqueRunDir("s"), maxRetries: 0 });
+  assert.equal(result.ok, true);
   assert.equal(result.failedAgents, 1);
-  assert.equal(result.events.some((event) => event.type === "run_end" && !event.ok), true);
+  // run_end carries ok:true (the script completed) plus the advisory failedAgents count.
+  // run_end 带有 ok:true（脚本已完成）以及通告性的 failedAgents 计数。
+  assert.equal(result.events.some((event) => event.type === "run_end" && event.ok), true);
+  const runEnd = result.events.find((event) => event.type === "run_end");
+  assert.equal(runEnd?.type === "run_end" ? runEnd.failedAgents : undefined, 1);
 });
 
 test("(r) a failing agent surfaces the executor's reason in the error + agent_end event", async () => {
@@ -692,6 +760,7 @@ test("(r) a failing agent surfaces the executor's reason in the error + agent_en
       executors: { boom: failing },
       runDir: uniqueRunDir("r"),
       onEvent: (e) => events.push(e),
+      maxRetries: 0,
     }),
     /usage limit/i,
   );
@@ -704,4 +773,154 @@ test("(r) a failing agent surfaces the executor's reason in the error + agent_en
     ),
     "agent_end.error should include the executor's reason",
   );
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// (t) Retry: a transient error_during_execution is retried, then succeeds. The agent resolves to
+// the successful value; tokens are counted ONCE (for the successful attempt, not the sum of all
+// attempts). Uses retryBackoffMs:1 so the suite stays fast.
+// (t) 重试：瞬时 error_during_execution 被重试后成功。agent 解析为成功值；token 只计一次
+//（成功那次，而非所有尝试之和）。用 retryBackoffMs:1 保持测试快速。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(t) Bug A+B+C: transient failure retried to success; tokens counted once", async () => {
+  let calls = 0;
+  const flaky: Executor = async (opts) => {
+    calls++;
+    if (calls < 3) {
+      // First two attempts: transient CLI crash ("Turn execution failed"). Retried.
+      // 前两次：瞬时 CLI 崩溃（"Turn execution failed"）。会被重试。
+      return {
+        text: "Turn execution failed (traceId: abc)",
+        sessionId: null,
+        costUsd: 0,
+        durationMs: 1,
+        resultSubtype: "error_during_execution",
+        isError: true,
+        usage: { inputTokens: 100, outputTokens: 50 },
+      };
+    }
+    // Third attempt: success, with its own token count.
+    // 第三次：成功，带自己的 token 计数。
+    return makeFakeResult(opts);
+  };
+  const script = `${META}\nreturn await agent('flaky node', { executor: 'flaky' });\n`;
+  const res = await runWorkflow({
+    script,
+    executors: { flaky },
+    runDir: uniqueRunDir("t"),
+    maxRetries: 3,
+    retryBackoffMs: 1,
+  });
+
+  assert.equal(calls, 3, "two retries then success → 3 executor calls");
+  assert.equal(res.ok, true);
+  assert.equal(res.failedAgents, 0);
+  // The agent resolved to the successful value.
+  // agent 解析为成功的值。
+  assert.equal(res.value, "FAKE:flaky node");
+  // Bug C: tokens counted ONCE for the successful attempt (outputTokens=5 from makeFakeResult),
+  // NOT the sum of the two failed attempts (which would be 50+50+5=110).
+  // Bug C：token 只对成功那次计一次（makeFakeResult 的 outputTokens=5），而非两次失败尝试
+  // 之和（否则为 50+50+5=110）。
+  assert.equal(res.tokensSpent, 5);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// (u) Retry: a PERMANENT failure (error_max_turns) is NOT retried — fails on the first attempt.
+// (u) 重试：永久失败（error_max_turns）不重试——第一次尝试即失败。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(u) Bug B: permanent failure (error_max_turns) is not retried", async () => {
+  let calls = 0;
+  const permanent: Executor = async () => {
+    calls++;
+    return {
+      text: "max turns",
+      sessionId: null,
+      costUsd: 0,
+      durationMs: 1,
+      resultSubtype: "error_max_turns",
+      isError: true,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
+  };
+  const script = `${META}\nreturn await agent('exhausted', { executor: 'perm' });\n`;
+  await assert.rejects(
+    runWorkflow({
+      script,
+      executors: { perm: permanent },
+      runDir: uniqueRunDir("u"),
+      maxRetries: 5,
+      retryBackoffMs: 1,
+    }),
+  );
+  assert.equal(calls, 1, "error_max_turns is permanent → exactly 1 call, no retries");
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// (v) Retry: exhausting the budget on a persistent transient failure still fails (and reports the
+// last attempt). maxRetries:2 → 3 total calls, then permanent failure.
+// (v) 重试：持续瞬时失败耗尽预算后仍失败（并报告最后一次尝试）。maxRetries:2 → 共 3 次调用，然后失败。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(v) Bug A: persistent transient failure exhausts retries and fails", async () => {
+  let calls = 0;
+  const alwaysTransient: Executor = async () => {
+    calls++;
+    return {
+      text: "Turn execution failed (traceId: xyz)",
+      sessionId: null,
+      costUsd: 0,
+      durationMs: 1,
+      resultSubtype: "error_during_execution",
+      isError: true,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
+  };
+  const script = `${META}\nreturn await agent('always down', { executor: 'down' });\n`;
+  await assert.rejects(
+    runWorkflow({
+      script,
+      executors: { down: alwaysTransient },
+      runDir: uniqueRunDir("v"),
+      maxRetries: 2,
+      retryBackoffMs: 1,
+    }),
+  );
+  // 1 initial + 2 retries = 3 total calls before giving up.
+  // 1 次初始 + 2 次重试 = 共 3 次调用后放弃。
+  assert.equal(calls, 3, "maxRetries:2 → 3 total attempts then permanent failure");
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// (w) Retry: per-agent `retries: 0` overrides a run-wide maxRetries, disabling retry for that node.
+// (w) 重试：按 agent 的 `retries: 0` 覆盖运行级 maxRetries，对该节点关闭重试。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("(w) Bug A: per-agent retries:0 overrides run-wide maxRetries", async () => {
+  let calls = 0;
+  const transient: Executor = async () => {
+    calls++;
+    return {
+      text: "Turn execution failed",
+      sessionId: null,
+      costUsd: 0,
+      durationMs: 1,
+      resultSubtype: "error_during_execution",
+      isError: true,
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
+  };
+  const script = `${META}\nreturn await agent('no retry here', { executor: 't', retries: 0 });\n`;
+  await assert.rejects(
+    runWorkflow({
+      script,
+      executors: { t: transient },
+      runDir: uniqueRunDir("w"),
+      maxRetries: 5,
+      retryBackoffMs: 1,
+    }),
+  );
+  assert.equal(calls, 1, "per-agent retries:0 → no retries despite run-wide maxRetries:5");
 });

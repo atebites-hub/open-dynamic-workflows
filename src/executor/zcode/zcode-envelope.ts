@@ -14,6 +14,8 @@
 // folding — at most one envelope line, and everything else on stdout is runtime
 // chatter that parseLine skips (returns null). No I/O, no subprocess; just parse
 // + map. This mirrors codex-jsonl.ts in role, not in complexity.
+
+import { extractJsonObject } from "../../schema/extract-json.js";
 // 这比 claude stream-json 或 codex JSONL 简单得多：没有事件折叠——至多一行
 // 信封，stdout 上其余内容都是运行时杂音，parseLine 会跳过（返回 null）。
 // 无 I/O、无子进程；只做解析 + 映射。它在角色上对应 codex-jsonl.ts，但复杂度更低。
@@ -37,6 +39,9 @@ export interface ZcodeResultEnvelope {
   /** Output tokens; null when telemetry is unavailable. */
   /** 输出 token；遥测不可用时为 null。 */
   outputTokens: number | null;
+  /** Total tokens (input+output+reasoning); null when the runtime reports no total. Bug 5. */
+  /** 总 token（input+output+reasoning）；运行时未报出总数时为 null。Bug 5。 */
+  totalTokens: number | null;
   /** False until the runtime reports verified machine-readable telemetry. */
   /** 在运行时报出已验证的机器可读遥测之前为 false。 */
   telemetryAvailable: boolean;
@@ -135,26 +140,45 @@ export function reduceZcodeEnvelope(
   }
 
   const isError = envelope.exitCode !== 0;
+  // Bug 5: map telemetry onto usage. The runtime footer (parsed by the launcher into the envelope)
+  // may carry input/output split OR only a total. The run's tokensSpent tracks outputTokens, so
+  // when the split is missing but a total is present, fall back to the total for outputTokens —
+  // better a non-zero, slightly-overestimated spend than a silent 0. inputTokens falls back
+  // symmetrically so the reported usage stays internally consistent.
+  // Bug 5：把遥测映射到 usage。运行时尾行（由 launcher 解析进信封）可能带 input/output 拆分，
+  // 也可能只带总数。run 的 tokensSpent 跟踪 outputTokens，故当拆分缺失但总数存在时，outputTokens
+  // 回退为总数——宁可花销非零且略微高估，也不要静默的 0。inputTokens 对称回退，使上报的用法
+  // 内部自洽。
+  const total = toFiniteNumber(envelope.totalTokens);
+  const outputTokens =
+    envelope.outputTokens !== null && Number.isFinite(envelope.outputTokens)
+      ? envelope.outputTokens
+      : total;
+  const inputTokens =
+    envelope.inputTokens !== null && Number.isFinite(envelope.inputTokens)
+      ? envelope.inputTokens
+      : total;
   const outcome: ZcodeOutcome = {
     text: envelope.text,
     sessionId: envelope.sessionId,
     costUsd: toFiniteNumber(envelope.costUsd),
     resultSubtype: isError ? "error_during_execution" : "success",
     isError,
-    usage: {
-      inputTokens: toFiniteNumber(envelope.inputTokens),
-      outputTokens: toFiniteNumber(envelope.outputTokens),
-    },
+    usage: { inputTokens, outputTokens },
     telemetryAvailable: envelope.telemetryAvailable === true,
   };
 
-  // When structured output is requested, parse the agent text as JSON. A parse
-  // failure is an error (flag it, don't throw) — matches the codex reducer.
-  // 请求结构化输出时，把 agent 文本当 JSON 解析。解析失败视为错误（标记，不抛）
-  // ——与 codex reducer 一致。
+  // When structured output is requested, parse the agent text as JSON. Models often wrap the
+  // JSON in prose or markdown fences, so extract the first balanced {...} object before parsing
+  // (a bare JSON.parse would throw on "Here is the result: {…}"). A parse failure is still an
+  // error (flag it, don't throw) — matches the codex reducer.
+  // 请求结构化输出时，把 agent 文本当 JSON 解析。模型常常把 JSON 包在散文或 markdown 围栏里，
+  // 因此解析前先提取第一个平衡的 {...} 对象（裸 JSON.parse 在 "Here is the result: {…}" 上会抛）。
+  // 解析失败仍视为错误（标记，不抛）——与 codex reducer 一致。
   if (opts?.schema) {
+    const candidate = extractJsonObject(outcome.text) ?? outcome.text;
     try {
-      outcome.structuredOutput = JSON.parse(outcome.text);
+      outcome.structuredOutput = JSON.parse(candidate);
     } catch {
       outcome.isError = true;
       outcome.resultSubtype = "error_during_execution";

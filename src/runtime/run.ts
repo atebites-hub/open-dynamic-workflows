@@ -188,6 +188,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       registryDir,
       ...(options.model !== undefined ? { defaultModel: options.model } : {}),
       ...(options.agentTimeoutMs !== undefined ? { agentTimeoutMs: options.agentTimeoutMs } : {}),
+      ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+      ...(options.retryBackoffMs !== undefined ? { retryBackoffMs: options.retryBackoffMs } : {}),
     };
 
     // workflow() — one level of nesting only; shares all run-global primitives.
@@ -258,7 +260,20 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     (event): event is Extract<ProgressEvent, { type: "workflow_end" }> =>
       event.type === "workflow_end" && !event.ok,
   ).length;
-  ok = failedAgents === 0 && failedWorkflows === 0;
+  // Bug 2: run-level `ok` means "the script completed and returned a value" — NOT "zero agent
+  // failures". parallel()/pipeline() are documented to resolve a throwing thunk to null so a
+  // workflow can .filter(Boolean) past a partial failure and still return a value; that is a
+  // successful run. Counting those swallowed failures against `ok` made every fault-tolerant
+  // workflow report "failed" and exit 1 despite a usable result. failedAgents/failedWorkflows
+  // stay advisory (surfaced in run_end + the result) so the label can say "ok (N failed)".
+  // Bug 2：运行级 `ok` 的含义是「脚本完成并返回了值」——而不是「零 agent 失败」。parallel()/
+  // pipeline() 按文档约定会把抛出的 thunk resolve 成 null，使 workflow 能用 .filter(Boolean)
+  // 跳过部分失败并仍返回值；这是一次成功的运行。把这些被吞掉的失败计入 `ok` 会让每个容错型
+  // workflow 都报告 "failed" 并以 1 退出，尽管结果可用。failedAgents/failedWorkflows 保持通告性
+  // （在 run_end + 结果中带出），让标签能显示 "ok (N failed)"。
+  // `ok` stays true from its initializer above (runInternal returned without throwing); it is
+  // gated by journal durability two lines below.
+  // `ok` 自上面初始化以来保持 true（runInternal 未抛出地返回了）；下方两行再以 journal 持久性收口。
   emit({
     type: "run_end",
     runId: journal.runId,
@@ -266,6 +281,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     tokensSpent: tokensSpent,
     durationMs,
     ts: now(),
+    failedAgents,
+    failedWorkflows,
   });
   const journalResult = await journal.close();
   durable = journalResult.durable;

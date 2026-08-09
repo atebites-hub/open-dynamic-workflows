@@ -143,8 +143,10 @@ async function main(): Promise<void> {
     const res = await runWorkflow(opts);
     tree.stop();
     process.stdout.write(`${JSON.stringify(res.value ?? null, null, 2)}\n`);
+    const advisoryFailures = (res.failedAgents ?? 0) + (res.failedWorkflows ?? 0);
     process.stderr.write(
-      `\n[done] run=${res.runId} agents=${res.agentCount} tokens=${res.tokensSpent} ${res.durationMs}ms\n`,
+      `\n[done] run=${res.runId} agents=${res.agentCount} tokens=${res.tokensSpent} ${res.durationMs}ms` +
+        (advisoryFailures > 0 ? ` · ${advisoryFailures} agent/workflow failure(s) swallowed by the script (run still ok)\n` : "\n"),
     );
     process.exit(res.ok ? 0 : 1);
   } catch (e) {

@@ -49,6 +49,7 @@
 import type { ExecOptions, Executor } from "../../types.js";
 import { parseZcodeEnvelopeLine, reduceZcodeEnvelope } from "./zcode-envelope.js";
 import { type ExecResultCore, makeSubprocessExecutor } from "../subprocess.js";
+import { compactSchemaToJson } from "../../schema/validate.js";
 
 /**
  * The zcode executable. Resolved once at module load. `ZCODE_BIN` lets a host pin
@@ -80,10 +81,15 @@ function composePrompt(opts: ExecOptions): string {
   if (opts.schema !== undefined) {
     // Instruct strict JSON. The reducer JSON.parse's the envelope text; the runtime
     // (hooks.ts) re-validates against the schema, so a malformed object still fails.
-    // 要求严格 JSON。reducer 会对信封 text 做 JSON.parse；运行时（hooks.ts）会
-    // 再次按 schema 校验，因此畸形对象仍会失败。
+    // Bug 4: the schema rides on argv (zcode has no stdin), so we COMPACT it first — drop doc-only
+    // keywords (description/title/examples/$comment/default) and cap length — to stay well under
+    // the ~256KB OS argv ceiling without changing what the model is asked to produce.
+    // 要求严格 JSON。reducer 会对信封 text 做 JSON.parse；运行时（hooks.ts）会再次按 schema 校验，
+    // 因此畸形对象仍会失败。Bug 4：schema 走 argv（zcode 无 stdin），故先【压缩】——去掉纯文档关键字
+    // （description/title/examples/$comment/default）并收口长度——以稳稳低于 OS 约 256KB 的 argv 上限，
+    // 同时不改变要求模型产出的内容。
     parts.push(
-      `Respond with ONLY valid JSON (no prose, no code fences) matching this JSON Schema:\n${JSON.stringify(opts.schema)}`,
+      `Respond with ONLY valid JSON (no prose, no code fences) matching this JSON Schema:\n${compactSchemaToJson(opts.schema)}`,
     );
   }
   parts.push(opts.prompt);
