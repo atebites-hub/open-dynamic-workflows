@@ -68,7 +68,8 @@ These are injected into the script scope:
   picks which agent CLI runs this node, by name, from the registry the host provides, e.g.
   `'claude'`, `'codex'`, or `'zcode'`; an unknown name fails the run), `label` (short display label),
   `phase` (assign to a progress group — **use this inside parallel/pipeline stages**),
-  `schema`, `model` (override; omit to inherit), `isolation:'worktree'` (fresh git worktree —
+  `schema`, `model` (override; omit to inherit), `reasoningEffort` (Codex override; a model
+  override defaults to `medium`), `isolation:'worktree'` (fresh git worktree —
   EXPENSIVE, only when agents mutate files in parallel), `agentType` (named subagent preset).
   Each node names its own executor — there is **no default**, so different nodes in one script
   can run on different CLIs (see the per-node example below).

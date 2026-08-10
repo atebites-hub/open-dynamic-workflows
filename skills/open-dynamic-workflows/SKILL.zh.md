@@ -60,7 +60,8 @@ export const meta = {
   被跳过 / 中止则返回 `null`(用 `.filter(Boolean)` 过滤)。`opts`:`executor`(**必填**——按名字
   从 host 提供的注册表里挑出运行本 node 的 agent CLI,如 `'claude'`、`'codex'` 或 `'zcode'`;未知名会让整个 run 失败)、
   `label`(简短显示名)、`phase`(指定进度分组——**在 parallel/pipeline 的 stage 里务必显式传**)、
-  `schema`、`model`(覆盖;省略则继承)、`isolation:'worktree'`(给该 agent 开独立 git worktree——
+  `schema`、`model`(覆盖;省略则继承)、`reasoningEffort`(Codex 覆盖;覆盖 model 时默认 `medium`)、
+  `isolation:'worktree'`(给该 agent 开独立 git worktree——
   **昂贵**,仅当并行改文件会冲突时用)、`agentType`(具名 subagent 预设)。
   每个 node 各自指定 executor——**没有默认值**,所以同一段脚本里不同 node 可以跑不同的 CLI(见下方 per-node 例子)。
 - **`pipeline(items, stage1, stage2, …) → Promise<any[]>`** —— 每个 item 独立流过所有 stage,

@@ -55,6 +55,9 @@ export interface AgentOptions {
   /** Model override for this call. */
   /** 本次调用的模型覆盖。 */
   model?: string;
+  /** Executor-specific reasoning effort. Codex model overrides default to medium when omitted. */
+  /** 执行器专用的推理强度。Codex 覆盖模型时，未指定则默认为 medium。 */
+  reasoningEffort?: string;
   /** Run this agent in a fresh git worktree (parallel file mutation). EXPENSIVE. */
   /** 在全新的 git worktree 中运行此 agent（并行修改文件）。开销很大。 */
   isolation?: "worktree";
@@ -126,6 +129,7 @@ export interface ExecOptions {
   prompt: string;
   cwd: string;
   model?: string;
+  reasoningEffort?: string;
   schema?: JsonSchema;
   appendSystemPrompt?: string;
   resumeSessionId?: string;

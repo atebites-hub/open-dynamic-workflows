@@ -172,6 +172,7 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
         signal: ctx.abort,
         tracePath: path.join(ctx.runDir, "agents", `agent-${id}.jsonl`),
         ...(resolvedModel !== undefined ? { model: resolvedModel } : {}),
+        ...(o.reasoningEffort !== undefined ? { reasoningEffort: o.reasoningEffort } : {}),
         ...(o.schema !== undefined ? { schema: o.schema } : {}),
         ...(appendSystemPrompt !== undefined ? { appendSystemPrompt } : {}),
         ...(ctx.agentTimeoutMs !== undefined ? { timeoutMs: ctx.agentTimeoutMs } : {}),
