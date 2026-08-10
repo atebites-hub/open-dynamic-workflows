@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -82,6 +82,7 @@ test("subprocess: happy path captures events, resolves ExecResult, writes a rich
   assert.equal(trace.prompt, "hello");
   assert.equal(trace.command, process.execPath);
   assert.equal(trace.events.length, 2);
+  assert.equal(statSync(opts.tracePath as string).mode & 0o777, 0o600);
 });
 
 test("subprocess: a nonzero-exit, stderr-only failure surfaces stderr AND records it in the trace", async () => {

@@ -14,6 +14,8 @@ test("model overrides get a compatible reasoning effort", () => {
     "never",
     "--sandbox",
     "workspace-write",
+    "-c",
+    "shell_environment_policy.ignore_default_excludes=false",
     "-m",
     "gpt-5.4-mini",
     "-c",
@@ -25,5 +27,7 @@ test("model overrides get a compatible reasoning effort", () => {
       'model_reasoning_effort="high"',
     ),
   );
-  assert.equal(buildCodexArgs(base).includes("-c"), false);
+  assert.ok(
+    buildCodexArgs(base).includes("shell_environment_policy.ignore_default_excludes=false"),
+  );
 });
