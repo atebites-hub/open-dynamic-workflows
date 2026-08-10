@@ -115,7 +115,7 @@ export interface ExecTrace {
 async function writeTrace(tracePath: string, trace: ExecTrace): Promise<void> {
   try {
     await mkdir(dirname(tracePath), { recursive: true });
-    await writeFile(tracePath, JSON.stringify(trace, null, 2));
+    await writeFile(tracePath, JSON.stringify(trace, null, 2), { mode: 0o600 });
   } catch (err) {
     console.warn(`[${trace.command}] trace write failed (${tracePath}):`, err);
   }

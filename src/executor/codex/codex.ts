@@ -29,7 +29,8 @@ import { type ExecResultCore, makeSubprocessExecutor } from "../subprocess.js";
  * final argv token is `-` ("read from stdin"), which also dodges the argv length
  * limit on long prompts — the same approach claude takes. A model override also
  * pins reasoning effort (medium by default) so an incompatible user-level effort
- * such as `max` cannot make the selected model fail before the turn starts.
+ * such as `max` cannot make the selected model fail before the turn starts. Codex's
+ * native shell policy strips key/secret/token variables from model-run commands.
  *
  * 根据 ExecOptions 构造 `codex exec` 的 argv。固定基底是
  * `exec --json --skip-git-repo-check --color never --sandbox workspace-write`：
@@ -50,6 +51,8 @@ export function buildCodexArgs(opts: ExecOptions, schemaPath?: string): string[]
     "never",
     "--sandbox",
     "workspace-write",
+    "-c",
+    "shell_environment_policy.ignore_default_excludes=false",
   ];
   if (opts.model) args.push("-m", opts.model);
   const reasoningEffort = opts.reasoningEffort ?? (opts.model ? "medium" : undefined);
@@ -144,7 +147,7 @@ export const codexExecutor: Executor = makeSubprocessExecutor({
       tmpdir(),
       `codex-schema-${randomBytes(8).toString("hex")}.json`,
     );
-    await writeFile(schemaPath, JSON.stringify(opts.schema));
+    await writeFile(schemaPath, JSON.stringify(opts.schema), { mode: 0o600 });
     return {
       args: buildCodexArgs(opts, schemaPath),
       stdin: opts.prompt,

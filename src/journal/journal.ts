@@ -101,7 +101,7 @@ export async function openJournal(params: {
   const eventsPath = path.join(runDir, "events.jsonl");
   const statusPath = path.join(runDir, "journal-status.json");
 
-  await mkdir(agentsDir, { recursive: true });
+  await mkdir(agentsDir, { recursive: true, mode: 0o700 });
 
   let resumeCache: Map<string, AgentRecord[]> | undefined;
   if (params.resumeFromRunId !== undefined) {
@@ -130,7 +130,7 @@ export async function openJournal(params: {
     async persistScript(source: string, ext: string): Promise<string> {
       const scriptPath = path.join(runDir, `script.${ext}`);
       try {
-        await writeFile(scriptPath, source, "utf8");
+        await writeFile(scriptPath, source, { encoding: "utf8", mode: 0o600 });
       } catch (err) {
         recordError("persistScript", err);
       }
@@ -141,7 +141,7 @@ export async function openJournal(params: {
       const line = `${JSON.stringify(rec)}\n`;
       appendChain = appendChain.then(async () => {
         try {
-          await appendFile(journalPath, line, "utf8");
+          await appendFile(journalPath, line, { encoding: "utf8", mode: 0o600 });
         } catch (err) {
           recordError("append", err);
         }
@@ -151,7 +151,7 @@ export async function openJournal(params: {
       const line = `${JSON.stringify(event)}\n`;
       eventChain = eventChain.then(async () => {
         try {
-          await appendFile(eventsPath, line, "utf8");
+          await appendFile(eventsPath, line, { encoding: "utf8", mode: 0o600 });
         } catch (err) {
           recordError("event append", err);
         }
@@ -167,7 +167,10 @@ export async function openJournal(params: {
       await eventChain;
       const result = { durable: errors.length === 0, errors: [...errors] };
       try {
-        await writeFile(statusPath, `${JSON.stringify(result)}\n`, "utf8");
+        await writeFile(statusPath, `${JSON.stringify(result)}\n`, {
+          encoding: "utf8",
+          mode: 0o600,
+        });
       } catch (err) {
         recordError("status write", err);
         result.durable = false;
