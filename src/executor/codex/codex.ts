@@ -27,7 +27,9 @@ import { type ExecResultCore, makeSubprocessExecutor } from "../subprocess.js";
  * `--dangerously-bypass-approvals-and-sandbox` (the codex twin of claude's
  * "no --dangerously-skip-permissions" rule). The prompt is fed on stdin, so the
  * final argv token is `-` ("read from stdin"), which also dodges the argv length
- * limit on long prompts — the same approach claude takes.
+ * limit on long prompts — the same approach claude takes. A model override also
+ * pins reasoning effort (medium by default) so an incompatible user-level effort
+ * such as `max` cannot make the selected model fail before the turn starts.
  *
  * 根据 ExecOptions 构造 `codex exec` 的 argv。固定基底是
  * `exec --json --skip-git-repo-check --color never --sandbox workspace-write`：
@@ -36,7 +38,8 @@ import { type ExecResultCore, makeSubprocessExecutor } from "../subprocess.js";
  * 【不变量】绝不输出 `--dangerously-bypass-approvals-and-sandbox`（claude 侧
  * “绝不 --dangerously-skip-permissions” 规则的 codex 对应物）。prompt 经 stdin
  * 喂入，因此 argv 末尾给 `-`（“从 stdin 读”），这也避免超长 prompt 撞 argv
- * 长度上限 —— 与 claude 的做法一致。
+ * 长度上限 —— 与 claude 的做法一致。覆盖模型时也固定推理强度（默认 medium），
+ * 避免用户级 `max` 等不兼容设置让所选模型在 turn 开始前失败。
  */
 export function buildCodexArgs(opts: ExecOptions, schemaPath?: string): string[] {
   const args: string[] = [
@@ -49,6 +52,10 @@ export function buildCodexArgs(opts: ExecOptions, schemaPath?: string): string[]
     "workspace-write",
   ];
   if (opts.model) args.push("-m", opts.model);
+  const reasoningEffort = opts.reasoningEffort ?? (opts.model ? "medium" : undefined);
+  if (reasoningEffort) {
+    args.push("-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`);
+  }
   if (schemaPath) args.push("--output-schema", schemaPath);
   if (opts.appendSystemPrompt) {
     // append semantics (a developer-role message), not a base-prompt override.
