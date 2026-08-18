@@ -68,6 +68,9 @@ export interface SubprocessSpec {
     args: string[];
     stdin?: string;
     env?: Record<string, string>;
+    /** Keys removed after the env merge so a nested CLI cannot re-import this plugin. */
+    /** 在合并环境变量后再删除的键，避免嵌套 CLI 再次导入本插件。 */
+    unsetEnv?: string[];
     cleanup?: () => void | Promise<void>;
   }>;
   /** Parse one stdout line into an event object, or null to skip it. */
@@ -170,7 +173,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
       // prepare() 是异步的（可能写临时文件）；之后才 spawn。
       void spec
         .prepare(opts)
-        .then(({ args, stdin, env, cleanup }) => {
+        .then(({ args, stdin, env, unsetEnv, cleanup }) => {
           cleanupFn = cleanup;
 
           // If the signal already aborted while prepare() was in flight, bail before spawning.
@@ -183,9 +186,18 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           }
 
           dbg(`spawn: ${spec.command} ${args.join(" ")} (cwd=${opts.cwd})`);
+          const childEnv: NodeJS.ProcessEnv = {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: "0",
+            ...opts.env,
+            ...env,
+          };
+          if (unsetEnv) {
+            for (const key of unsetEnv) delete childEnv[key];
+          }
           const child = spawn(spec.command, args, {
             cwd: opts.cwd,
-            env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...opts.env, ...env },
+            env: childEnv,
             stdio: ["pipe", "pipe", "pipe"],
             // New process group: the CLI may spawn its own children (MCP servers, tool
             // 新建进程组：CLI 可能派生它自己的子进程（MCP server、工具

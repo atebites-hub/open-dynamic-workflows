@@ -66,13 +66,13 @@ These are injected into the script scope:
   matching object and `agent()` resolves to the **validated object**. Returns `null` if the
   agent is skipped/aborted (filter with `.filter(Boolean)`). `opts`: `executor` (**required** —
   picks which agent CLI runs this node, by name, from the registry the host provides, e.g.
-  `'claude'`, `'codex'`, or `'zcode'`; an unknown name fails the run), `label` (short display label),
+  `'grok'`, `'claude'`, `'codex'`, or `'zcode'`; an unknown name fails the run), `label` (short display label),
   `phase` (assign to a progress group — **use this inside parallel/pipeline stages**),
   `schema`, `model` (override; omit to inherit), `reasoningEffort` (Codex override; a model
   override defaults to `medium`), `isolation:'worktree'` (fresh git worktree —
   EXPENSIVE, only when agents mutate files in parallel), `agentType` (named subagent preset).
-  Each node names its own executor — there is **no default**, so different nodes in one script
-  can run on different CLIs (see the per-node example below).
+  Prefer **grok** first. Hosts may set a default executor (Grok Build does); otherwise every
+  node must name its executor (see the per-node example below).
 - **`pipeline(items, stage1, stage2, …) → Promise<any[]>`** — run each item through all
   stages independently, **NO barrier between stages** (item A can be in stage 3 while item B
   is in stage 1). Each stage callback gets `(prevResult, originalItem, index)`. A throwing
@@ -95,8 +95,8 @@ Because `executor` is **per node**, one script can mix CLIs — e.g. have one CL
 different one review, when you want the verifier to be a different model from the author:
 
 ```js
-// Each agent() names its own CLI. 'claude', 'codex', and 'zcode' all come from the host's registry.
-const draft = await agent('Draft a fix for this failing test.', { executor: 'claude', label: 'draft' })
+// Prefer zcode. Name another CLI when you want a different worker.
+const draft = await agent('Draft a fix for this failing test.', { executor: 'zcode', label: 'draft' })
 const review = await agent(`Independently review this fix — is it correct?\n\n${draft}`, {
   executor: 'codex', label: 'review', schema: VERDICT_SCHEMA,
 })
@@ -107,8 +107,8 @@ return { draft, review, notes }
 ### 3. Rules that the runtime enforces (fail fast)
 
 - **Plain JS only**: no `import`, `require`, `fs`, or Node APIs in the script.
-- **Every `agent()` needs an `executor`**: there is no default. A missing or unknown executor
-  name (one not in the host's registry) fails the run with a clear error.
+- **Every `agent()` needs an `executor` unless the host set a default**: Grok Build defaults
+  to `grok`. Standalone / Codex / ZCode have no default. An unknown name fails the run.
 - **Determinism**: `Date.now()`, `Math.random()`, and argless `new Date()` are unavailable
   (they would break resume). Pass timestamps via `args`; vary by index instead of random.
 - **Structured output**: `opts.schema` is a JSON Schema whose **root must be `type:"object"`**
