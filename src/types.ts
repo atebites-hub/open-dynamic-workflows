@@ -263,6 +263,13 @@ export interface RunOptions {
   /** Required named registry of executors. Each agent() picks one by key via AgentOptions.executor; missing/unknown throws. */
   /** 必填的命名 executor 注册表。每个 agent() 通过 AgentOptions.executor 按 key 选用；缺失/未知则 throw。 */
   executors: Record<string, Executor>;
+  /**
+   * Optional host-supplied default registry key used when agent() omits executor.
+   * Unset means fail-fast (INVARIANT #10). The Grok-hosted plugin sets this to "zcode".
+   * 可选的 host 默认注册表 key：agent() 省略 executor 时使用。未设置则 fail-fast（不变量 #10）。
+   * Grok 托管的插件把它设为 "zcode"。
+   */
+  defaultExecutor?: string;
   /** Per-agent default timeout. */
   /** 每个 agent 的默认超时。 */
   agentTimeoutMs?: number;
@@ -332,6 +339,9 @@ export interface RunContext {
   /** Named executor registry; agent() resolves AgentOptions.executor against this map. */
   /** 命名 executor 注册表；agent() 用 AgentOptions.executor 对照此 map 解析。 */
   executors: Record<string, Executor>;
+  /** Host-supplied default executor name; unset keeps the fail-fast "executor required" rule. */
+  /** host 提供的默认 executor 名；未设置则保持 fail-fast「必须指定 executor」规则。 */
+  defaultExecutor?: string;
   agentTimeoutMs?: number;
   /** Run-wide default retry budget for transient (error_during_execution) failures. */
   /** 瞬时（error_during_execution）失败的运行级默认重试预算。 */

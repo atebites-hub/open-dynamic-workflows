@@ -7,25 +7,31 @@ export { runWorkflow } from "./runtime/run.js";
 // 内置的 executor 适配器 —— 每个 CLI 一个适配器，可替换或扩展成你的模型/harness。
 export { claudeExecutor, buildClaudeArgs } from "./executor/claude/claude.js";
 export { codexExecutor, buildCodexArgs } from "./executor/codex/codex.js";
+export { grokExecutor, buildGrokArgs } from "./executor/grok/grok.js";
 export { zcodeExecutor, buildZcodeArgs } from "./executor/zcode/zcode.js";
 
 // Pure reducers + the shared subprocess driver — exposed so hosts can build their own adapters.
 // 纯归约器 + 共享子进程 driver —— 导出以便 host 自行构建适配器。
 export { reduceStreamJsonEvents, parseStreamJsonLine } from "./executor/claude/stream-json.js";
 export { reduceCodexEvents, parseCodexJsonLine } from "./executor/codex/codex-jsonl.js";
+export { reduceGrokEvents, reduceGrokJson, reduceGrokStreamingJson, parseGrokJsonLine } from "./executor/grok/grok-json.js";
 export { reduceZcodeEnvelope, parseZcodeEnvelopeLine } from "./executor/zcode/zcode-envelope.js";
 export { makeSubprocessExecutor } from "./executor/subprocess.js";
 
 import { claudeExecutor } from "./executor/claude/claude.js";
 import { codexExecutor } from "./executor/codex/codex.js";
+import { grokExecutor } from "./executor/grok/grok.js";
 import { zcodeExecutor } from "./executor/zcode/zcode.js";
 
-// Out-of-the-box registry, ready to pass as RunOptions.executors (or extend). This is
-// NOT a "default executor": every agent() must still name one explicitly via {executor}.
-// 开箱即用的注册表，可直接作为 RunOptions.executors 传入（或扩展）。它不是“默认
-// executor”：每个 agent() 仍须通过 {executor} 显式指定名字。
+// Out-of-the-box registry, ready to pass as RunOptions.executors (or extend).
+// There is still no implicit default: agent() must name one, unless the host sets
+// RunOptions.defaultExecutor (the Grok-hosted plugin does this for zcode).
+// 开箱即用的注册表，可直接作为 RunOptions.executors 传入（或扩展）。
+// 仍然没有隐式默认：agent() 必须指名，除非 host 设置了 RunOptions.defaultExecutor
+// （Grok 托管的插件会把默认设为 zcode）。
 export const builtinExecutors = {
+  zcode: zcodeExecutor,
+  grok: grokExecutor,
   claude: claudeExecutor,
   codex: codexExecutor,
-  zcode: zcodeExecutor,
 };

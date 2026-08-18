@@ -152,10 +152,10 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     options.onEvent?.(e);
   };
 
-  // (7) Executor registry. Required and non-empty — there is NO default executor;
-  // each agent() must name one by key (resolved in hooks.ts). Fail fast otherwise.
-  // (7) Executor 注册表。必填且非空——没有默认 executor；每个 agent() 必须按 key
-  // 指定一个（在 hooks.ts 中解析）。否则 fail fast。
+  // (7) Executor registry. Required and non-empty. Missing executor still fails
+  // fast unless the host set defaultExecutor (Grok-hosted plugin only).
+  // (7) Executor 注册表。必填且非空。缺 executor 仍 fail fast，除非 host 设置了
+  // defaultExecutor（仅 Grok 托管插件）。
   const executors = options.executors;
   if (!executors || Object.keys(executors).length === 0) {
     throw new Error("runWorkflow requires a non-empty 'executors' map");
@@ -187,6 +187,9 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       },
       registryDir,
       ...(options.model !== undefined ? { defaultModel: options.model } : {}),
+      ...(options.defaultExecutor !== undefined
+        ? { defaultExecutor: options.defaultExecutor }
+        : {}),
       ...(options.agentTimeoutMs !== undefined ? { agentTimeoutMs: options.agentTimeoutMs } : {}),
       ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
       ...(options.retryBackoffMs !== undefined ? { retryBackoffMs: options.retryBackoffMs } : {}),

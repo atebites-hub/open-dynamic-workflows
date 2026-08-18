@@ -110,14 +110,15 @@ function cleanupWorktree(repoCwd: string, wtDir: string): void {
 
 export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
   const agent = async (prompt: string, opts?: AgentOptions): Promise<unknown> => {
-    // `executor` is required in the public AgentOptions type, but the runtime must still
-    // tolerate `agent(prompt)` with no opts at all so it can fail fast with a helpful
-    // message (INVARIANT #10 — no default executor). Model the fallback as Partial so the
-    // "missing executor" path stays reachable and type-checks (o.executor is then string | undefined).
-    // `executor` 在公开的 AgentOptions 类型里是必填的，但运行时仍须容忍完全不传 opts 的
-    // `agent(prompt)`，以便 fail fast 给出有用的报错（不变量 #10——没有默认 executor）。
-    // 把回退建模为 Partial，使「缺 executor」分支可达且能通过类型检查（此时 o.executor 为 string | undefined）。
-    const o: Partial<AgentOptions> = opts ?? {};
+    // `executor` is required in the public AgentOptions type unless the host set
+    // RunOptions.defaultExecutor (Grok-hosted plugin only). Tolerate `agent(prompt)`
+    // with no opts so the missing-executor path stays reachable (INVARIANT #10).
+    // `executor` 在公开 AgentOptions 里是必填的，除非 host 设置了 RunOptions.defaultExecutor
+    //（仅 Grok 托管插件）。容忍不传 opts 的 `agent(prompt)`，使「缺 executor」分支可达（不变量 #10）。
+    const o: Partial<AgentOptions> = { ...(opts ?? {}) };
+    if (!o.executor && ctx.defaultExecutor) {
+      o.executor = ctx.defaultExecutor;
+    }
     const key = keyFor(prompt, o);
     let id: number;
     try {

@@ -598,6 +598,38 @@ test("(n) agent() with no executor rejects the run (executor is required)", asyn
   await assert.rejects(runWorkflow(opts("n", script)), /executor/i);
 });
 
+test("(n2) defaultExecutor routes an omitted executor to that registry key", async () => {
+  const script = `${META}\nreturn await agent('hello');\n`;
+  const res = await runWorkflow({
+    ...opts("n2", script),
+    executors: { grok: fakeExecutor },
+    defaultExecutor: "grok",
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.value, "FAKE:hello");
+  assert.equal(res.agentCount, 1);
+});
+
+test("(n3) defaultExecutor does not override an explicit executor", async () => {
+  let hit = "";
+  const grok: Executor = async () => {
+    hit = "grok";
+    return fakeExecutor({ prompt: "g", cwd: process.cwd() });
+  };
+  const named: Executor = async () => {
+    hit = "named";
+    return fakeExecutor({ prompt: "n", cwd: process.cwd() });
+  };
+  const script = `${META}\nreturn await agent('explicit', { executor: 'named' });\n`;
+  const res = await runWorkflow({
+    ...opts("n3", script),
+    executors: { grok, named },
+    defaultExecutor: "grok",
+  });
+  assert.equal(res.ok, true);
+  assert.equal(hit, "named");
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // (o) unknown executor name: {executor:'nope'} that isn't in the registry → rejects.
 // (o) 未知 executor 名：{executor:'nope'} 不在注册表里 → reject。

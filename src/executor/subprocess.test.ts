@@ -131,6 +131,49 @@ test("subprocess: idle timeout on a silent CLI (zero stdout) names the single-en
   );
 });
 
+test("subprocess: unsetEnv removes keys from the child environment", async () => {
+  const exec = makeSubprocessExecutor({
+    command: process.execPath,
+    prepare: async () => ({
+      args: [
+        "-e",
+        `const hit = process.env.GROK_PLUGIN_ROOT; process.stdout.write(JSON.stringify({type:'done',text: hit === undefined ? 'unset' : hit})+'\\n');`,
+      ],
+      env: { ODW_GROK_LEAF: "1" },
+      unsetEnv: ["GROK_PLUGIN_ROOT"],
+    }),
+    parseLine: (line: string): unknown | null => {
+      const t = line.trim();
+      if (!t) return null;
+      try {
+        return JSON.parse(t);
+      } catch {
+        return null;
+      }
+    },
+    reduce: (events): ExecResultCore => {
+      const last = events[events.length - 1] as { text?: unknown } | undefined;
+      return {
+        text: String(last?.text ?? ""),
+        sessionId: null,
+        costUsd: 0,
+        resultSubtype: "success",
+        isError: false,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    },
+  });
+  const prev = process.env.GROK_PLUGIN_ROOT;
+  process.env.GROK_PLUGIN_ROOT = "/should/not/leak";
+  try {
+    const res = await exec(freshOpts());
+    assert.equal(res.text, "unset");
+  } finally {
+    if (prev === undefined) delete process.env.GROK_PLUGIN_ROOT;
+    else process.env.GROK_PLUGIN_ROOT = prev;
+  }
+});
+
 test("subprocess: idle timeout after activity (stdout seen, then silent) does NOT add the single-envelope note", async () => {
   // Prints one event, then goes silent for 2s — stdout WAS seen, so this is a genuine stall after
   // activity, not the single-envelope trap. The idle timer fires because no further stdout resets it.
