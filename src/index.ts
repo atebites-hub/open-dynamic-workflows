@@ -8,6 +8,7 @@ export { runWorkflow } from "./runtime/run.js";
 export { claudeExecutor, buildClaudeArgs } from "./executor/claude/claude.js";
 export { codexExecutor, buildCodexArgs } from "./executor/codex/codex.js";
 export { grokExecutor, buildGrokArgs } from "./executor/grok/grok.js";
+export { cursorExecutor, buildCursorArgs, resolveCursorBin } from "./executor/cursor/cursor.js";
 export { zcodeExecutor, buildZcodeArgs } from "./executor/zcode/zcode.js";
 
 // Pure reducers + the shared subprocess driver — exposed so hosts can build their own adapters.
@@ -15,12 +16,14 @@ export { zcodeExecutor, buildZcodeArgs } from "./executor/zcode/zcode.js";
 export { reduceStreamJsonEvents, parseStreamJsonLine } from "./executor/claude/stream-json.js";
 export { reduceCodexEvents, parseCodexJsonLine } from "./executor/codex/codex-jsonl.js";
 export { reduceGrokEvents, reduceGrokJson, reduceGrokStreamingJson, parseGrokJsonLine } from "./executor/grok/grok-json.js";
+export { reduceCursorEvents, reduceCursorJson, reduceCursorStreamJson, parseCursorJsonLine } from "./executor/cursor/cursor-json.js";
 export { reduceZcodeEnvelope, parseZcodeEnvelopeLine } from "./executor/zcode/zcode-envelope.js";
 export { makeSubprocessExecutor } from "./executor/subprocess.js";
 
 import { claudeExecutor } from "./executor/claude/claude.js";
 import { codexExecutor } from "./executor/codex/codex.js";
 import { grokExecutor } from "./executor/grok/grok.js";
+import { cursorExecutor } from "./executor/cursor/cursor.js";
 import { zcodeExecutor } from "./executor/zcode/zcode.js";
 
 // Out-of-the-box registry, ready to pass as RunOptions.executors (or extend).
@@ -30,6 +33,7 @@ import { zcodeExecutor } from "./executor/zcode/zcode.js";
 // 仍然没有隐式默认：agent() 必须指名，除非 host 设置了 RunOptions.defaultExecutor
 // （Grok 托管的插件会把默认设为 zcode）。
 export const builtinExecutors = {
+  cursor: cursorExecutor,
   zcode: zcodeExecutor,
   grok: grokExecutor,
   claude: claudeExecutor,
