@@ -89,6 +89,42 @@ test("(1) happy path: exitCode 0 → text extracted, isError=false, subtype=succ
   assert.equal(outcome.structuredOutput, undefined);
 });
 
+test("policy envelope requires one matching ODW runtime attestation", () => {
+  const attestation = {
+    type: "zcode_runtime_attestation",
+    schemaVersion: 1,
+    executor: "zcode",
+    route: "odw",
+    runtimeId: "runtime-1",
+    runtimeVersion: "0.1.0",
+    sessionId: "runtime-1",
+    role: "main",
+    parentSessionId: null,
+    policySource: null,
+    rolePolicy: null,
+    rolePolicyFingerprint: null,
+    model: "zai/glm",
+    reasoningEffort: "high",
+  } as const;
+  const envelopeWithAttestation = envelope({ sessionId: "runtime-1", runtimeAttestation: attestation });
+  const policy = { executor: "zcode", model: "zai/glm", reasoningEffort: "high" } as const;
+  const ok = reduceZcodeEnvelope(eventsFromLines([envelopeWithAttestation]), {
+    effectiveRoute: policy,
+    routingPolicyFingerprint: "a".repeat(64),
+  });
+  assert.equal(ok.isError, false);
+  const missing = reduceZcodeEnvelope(eventsFromLines([envelope({ sessionId: "runtime-1" })]), {
+    effectiveRoute: policy,
+    routingPolicyFingerprint: "a".repeat(64),
+  });
+  assert.equal(missing.isError, true);
+  const mismatch = reduceZcodeEnvelope(eventsFromLines([envelopeWithAttestation.replace("high", "low")]), {
+    effectiveRoute: policy,
+    routingPolicyFingerprint: "a".repeat(64),
+  });
+  assert.equal(mismatch.isError, true);
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // (2) schema: envelope.text is a JSON string → structuredOutput parsed
 // (2) schema：信封 text 是一段 JSON 字符串 → structuredOutput 被解析出来

@@ -1,6 +1,6 @@
 {
   "name": "open-dynamic-workflows",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "description": "A faithful, standalone reimplementation of the official Claude Code Workflow tool's orchestration runtime. Runs a JS workflow script that fans out subagents via agent()/parallel()/pipeline()/phase(). Model-agnostic via a pluggable Executor; the bundled claude --print adapter is the reference.",

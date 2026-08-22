@@ -20,6 +20,7 @@ import type {
   Thunk,
   WorkflowRef,
 } from "../types.js";
+import { resolveAgentRoute } from "./routing.js";
 import { keyFor } from "../journal/journal.js";
 import { assertObjectRootSchema, validateAgainstSchema } from "../schema/validate.js";
 import type { Semaphore } from "./semaphore.js";
@@ -116,7 +117,16 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
     // `executor` 在公开 AgentOptions 里是必填的，除非 host 设置了 RunOptions.defaultExecutor
     //（仅 Grok 托管插件）。容忍不传 opts 的 `agent(prompt)`，使「缺 executor」分支可达（不变量 #10）。
     const o: Partial<AgentOptions> = { ...(opts ?? {}) };
-    if (!o.executor && ctx.defaultExecutor) {
+    resolveAgentRoute(ctx.routingPolicy, {
+      ...(o.executor !== undefined ? { executor: o.executor } : {}),
+      ...(o.model !== undefined ? { model: o.model } : {}),
+      ...(o.reasoningEffort !== undefined ? { reasoningEffort: o.reasoningEffort } : {}),
+    });
+    if (ctx.routingPolicy) {
+      o.executor = ctx.routingPolicy.executor;
+      o.model = ctx.routingPolicy.model;
+      o.reasoningEffort = ctx.routingPolicy.reasoningEffort;
+    } else if (!o.executor && ctx.defaultExecutor) {
       o.executor = ctx.defaultExecutor;
     }
     const key = keyFor(prompt, o);
@@ -174,6 +184,8 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
         tracePath: path.join(ctx.runDir, "agents", `agent-${id}.jsonl`),
         ...(resolvedModel !== undefined ? { model: resolvedModel } : {}),
         ...(o.reasoningEffort !== undefined ? { reasoningEffort: o.reasoningEffort } : {}),
+        ...(ctx.routingPolicyFingerprint !== undefined ? { routingPolicyFingerprint: ctx.routingPolicyFingerprint } : {}),
+        ...(ctx.routingPolicy !== undefined ? { effectiveRoute: ctx.routingPolicy } : {}),
         ...(o.schema !== undefined ? { schema: o.schema } : {}),
         ...(appendSystemPrompt !== undefined ? { appendSystemPrompt } : {}),
         ...(ctx.agentTimeoutMs !== undefined ? { timeoutMs: ctx.agentTimeoutMs } : {}),

@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 
 import { runWorkflow } from "./runtime/run.js";
@@ -64,6 +64,72 @@ function opts(tag: string, script: string, extra: Partial<RunOptions> = {}): Run
 }
 
 const META = `export const meta = { name: 'smoke', description: 'smoke test workflow' }\n`;
+
+test("routing policy validates before workflow execution and journal creation", async () => {
+  const runDir = uniqueRunDir("policy-invalid");
+  let calls = 0;
+  const counted: Executor = async (execOpts) => {
+    calls += 1;
+    return makeFakeResult(execOpts);
+  };
+  await assert.rejects(runWorkflow({
+    ...opts("policy-invalid", `${META}\nreturn await agent('never', { executor: 'fake' });\n`),
+    runDir,
+    executors: { fake: counted },
+    routingPolicy: { executor: "missing", model: "gpt", reasoningEffort: "high" },
+  }), /unregistered executor/);
+  assert.equal(calls, 0);
+  await assert.rejects(stat(runDir));
+});
+
+test("run_start, workflow result, and nested workflow carry one immutable routing policy", async () => {
+  const runDir = uniqueRunDir("policy-lifecycle");
+  const nestedDir = path.join(runDir, "nested");
+  await mkdir(path.join(nestedDir, "child"), { recursive: true });
+  await writeFile(path.join(nestedDir, "child", "script.js"), `${META.replace("smoke", "child")}\nreturn await agent('nested', {});\n`);
+  const policy = { executor: "fake", model: "gpt", reasoningEffort: "high" } as const;
+  const res = await runWorkflow({
+    ...opts("policy-lifecycle", `${META}\nconst value = await agent('root', {}); return { value, nested: await workflow('child') };\n`),
+    runDir,
+    registryDir: nestedDir,
+    routingPolicy: policy,
+  });
+  assert.deepEqual(res.routingPolicy, policy);
+  assert.equal(typeof res.routingPolicyFingerprint, "string");
+  const start = res.events.find((event) => event.type === "run_start");
+  assert.equal(start?.type === "run_start" ? start.routingPolicyFingerprint : undefined, res.routingPolicyFingerprint);
+  assert.equal(res.agentCount, 2);
+});
+
+test("conflicting policy route fails before cache and agent launch", async () => {
+  const runDir = uniqueRunDir("policy-conflict");
+  let calls = 0;
+  const counted: Executor = async (execOpts) => {
+    calls += 1;
+    return makeFakeResult(execOpts);
+  };
+  const events: ProgressEvent[] = [];
+  await assert.rejects(runWorkflow({
+    ...opts("policy-conflict", `${META}\nreturn await agent('conflict', { executor: 'fake', model: 'other' });\n`),
+    runDir,
+    executors: { fake: counted },
+    routingPolicy: { executor: "fake", model: "gpt", reasoningEffort: "high" },
+    onEvent: (event) => events.push(event),
+  }), /model conflict/);
+  assert.equal(calls, 0);
+  assert.equal(events.some((event) => event.type === "agent_start"), false);
+});
+
+test("routing policy plus resume is rejected before journal creation", async () => {
+  const runDir = uniqueRunDir("policy-resume");
+  await assert.rejects(runWorkflow({
+    ...opts("policy-resume", `${META}\nreturn 1;`),
+    runDir,
+    resumeFromRunId: "prior-run",
+    routingPolicy: { executor: "fake", model: "gpt", reasoningEffort: "high" },
+  }), /routingPolicy cannot be combined with resumeFromRunId/);
+  await assert.rejects(stat(runDir));
+});
 
 // ────────────────────────────────────────────────────────────────────────────
 // (a) phase()/log()/agent() — script value returned; agent() text = "FAKE:..."

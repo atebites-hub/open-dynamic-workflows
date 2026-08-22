@@ -64,7 +64,8 @@ These are injected into the script scope:
 - **`agent(prompt, opts?) → Promise<any>`** — spawn one subagent. Without `schema`, resolves
   to its final text. With `schema` (a JSON Schema), the subagent is forced to produce a
   matching object and `agent()` resolves to the **validated object**. Returns `null` if the
-  agent is skipped/aborted (filter with `.filter(Boolean)`). `opts`: `executor` (**required** —
+  agent is skipped/aborted (filter with `.filter(Boolean)`). `opts`: `executor` (required unless
+  the enclosing run has a routing policy —
   picks which agent CLI runs this node, by name, from the registry the host provides, e.g.
   `'grok'`, `'claude'`, `'codex'`, or `'zcode'`; an unknown name fails the run), `label` (short display label),
   `phase` (assign to a progress group — **use this inside parallel/pipeline stages**),
@@ -73,6 +74,12 @@ These are injected into the script scope:
   EXPENSIVE, only when agents mutate files in parallel), `agentType` (named subagent preset).
   Prefer **grok** first. Hosts may set a default executor (Grok Build does); otherwise every
   node must name its executor (see the per-node example below).
+
+  A host may instead provide `runWorkflow({ routingPolicy: { executor, model, reasoningEffort } })`.
+  The policy is immutable for the run and nested workflows: omitted node route fields inherit it,
+  while explicit conflicts fail before cache lookup or launch. It is normalized and fingerprinted
+  before the journal opens, cannot be combined with `resumeFromRunId`, and its route evidence is
+  correlation metadata rather than host attestation. Unpolicy behavior is unchanged.
 - **`pipeline(items, stage1, stage2, …) → Promise<any[]>`** — run each item through all
   stages independently, **NO barrier between stages** (item A can be in stage 3 while item B
   is in stage 1). Each stage callback gets `(prevResult, originalItem, index)`. A throwing
