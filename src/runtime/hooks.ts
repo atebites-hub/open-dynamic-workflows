@@ -111,22 +111,17 @@ function cleanupWorktree(repoCwd: string, wtDir: string): void {
 
 export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
   const agent = async (prompt: string, opts?: AgentOptions): Promise<unknown> => {
-    // `executor` is required in the public AgentOptions type unless the host set
-    // RunOptions.defaultExecutor (Grok-hosted plugin only). Tolerate `agent(prompt)`
-    // with no opts so the missing-executor path stays reachable (INVARIANT #10).
-    // `executor` 在公开 AgentOptions 里是必填的，除非 host 设置了 RunOptions.defaultExecutor
-    //（仅 Grok 托管插件）。容忍不传 opts 的 `agent(prompt)`，使「缺 executor」分支可达（不变量 #10）。
+    // A routing policy or defaultExecutor may supply the optional executor. Without either,
+    // the existing fail-fast missing-executor path remains reachable (INVARIANT #10).
+    // routing policy 或 defaultExecutor 可提供可选 executor；两者都没有时，仍走原有的
+    // fail-fast 缺 executor 路径（不变量 #10）。
     const o: Partial<AgentOptions> = { ...(opts ?? {}) };
-    resolveAgentRoute(ctx.routingPolicy, {
+    Object.assign(o, resolveAgentRoute(ctx.routingPolicy, {
       ...(o.executor !== undefined ? { executor: o.executor } : {}),
       ...(o.model !== undefined ? { model: o.model } : {}),
       ...(o.reasoningEffort !== undefined ? { reasoningEffort: o.reasoningEffort } : {}),
-    });
-    if (ctx.routingPolicy) {
-      o.executor = ctx.routingPolicy.executor;
-      o.model = ctx.routingPolicy.model;
-      o.reasoningEffort = ctx.routingPolicy.reasoningEffort;
-    } else if (!o.executor && ctx.defaultExecutor) {
+    }));
+    if (!ctx.routingPolicy && !o.executor && ctx.defaultExecutor) {
       o.executor = ctx.defaultExecutor;
     }
     const key = keyFor(prompt, o);

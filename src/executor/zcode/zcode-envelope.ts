@@ -80,7 +80,11 @@ export interface ZcodeOutcome {
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function toFiniteNumber(v: unknown): number {
@@ -170,23 +174,27 @@ export function reduceZcodeEnvelope(
   if (opts?.effectiveRoute !== undefined) {
     if (envelopes.length !== 1) return invalidAttestation("expected exactly one result envelope");
     const attestation = envelope.runtimeAttestation;
-    if (!attestation || typeof attestation !== "object") return invalidAttestation("missing runtime attestation");
+    if (!isObject(attestation)) return invalidAttestation("missing runtime attestation");
     if (attestation.type !== "zcode_runtime_attestation" || attestation.schemaVersion !== 1
       || attestation.executor !== "zcode" || attestation.route !== "odw"
       || attestation.role !== "main" || attestation.parentSessionId !== null
       || attestation.policySource !== null || attestation.rolePolicy !== null
-      || attestation.rolePolicyFingerprint !== null) {
+      || attestation.rolePolicyFingerprint !== null
+      || !isNonEmptyString(attestation.runtimeVersion)) {
       return invalidAttestation("malformed runtime attestation");
     }
-    if (typeof attestation.runtimeId !== "string" || attestation.runtimeId.length === 0
-      || typeof attestation.sessionId !== "string" || attestation.sessionId.length === 0
+    if (attestation.runtimeVersion === "unknown") return invalidAttestation("fallback runtime version");
+    if (!isNonEmptyString(attestation.runtimeId) || !isNonEmptyString(attestation.sessionId)
       || attestation.runtimeId !== attestation.sessionId || attestation.runtimeId !== envelope.sessionId) {
       return invalidAttestation("runtime id mismatch");
     }
+    if (opts.effectiveRoute.executor !== "zcode") return invalidAttestation("executor mismatch");
     if (attestation.model !== opts.effectiveRoute.model || attestation.reasoningEffort !== opts.effectiveRoute.reasoningEffort) {
       return invalidAttestation("observed route mismatch");
     }
-    if (!opts.routingPolicyFingerprint) return invalidAttestation("missing policy fingerprint");
+    if (!/^[a-f0-9]{64}$/u.test(opts.routingPolicyFingerprint ?? "")) {
+      return invalidAttestation("invalid policy fingerprint");
+    }
   }
 
   const isError = envelope.exitCode !== 0;
