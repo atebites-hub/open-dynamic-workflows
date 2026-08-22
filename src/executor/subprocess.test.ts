@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -82,6 +82,7 @@ test("subprocess: happy path captures events, resolves ExecResult, writes a rich
   assert.equal(trace.prompt, "hello");
   assert.equal(trace.command, process.execPath);
   assert.equal(trace.events.length, 2);
+  assert.equal(statSync(opts.tracePath as string).mode & 0o777, 0o600);
 });
 
 test("subprocess: a nonzero-exit, stderr-only failure surfaces stderr AND records it in the trace", async () => {
@@ -102,4 +103,93 @@ test("subprocess: a nonzero-exit, stderr-only failure surfaces stderr AND record
   assert.equal(trace.exitCode, 1);
   assert.match(trace.stderr, /usage limit/);
   assert.equal(trace.events.length, 0);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Bug 3: a silent "CLI" (like zcode in ODW-protocol mode, which prints one terminal
+// envelope) + a short idleTimeoutMs → the stream-based idle watchdog fires with the
+// explanatory note, since no stdout ever arrived to reset it.
+// Bug 3：一个沉默的"CLI"（如 zcode 在 ODW-protocol 模式下只打印一行终止信封）+ 一个很短的
+// idleTimeoutMs → 基于流的 idle 看门狗触发并带说明，因为从未有 stdout 到达来重置它。
+// ────────────────────────────────────────────────────────────────────────────
+
+test("subprocess: idle timeout on a silent CLI (zero stdout) names the single-envelope cause (Bug 3)", async () => {
+  // Sleeps 2s without writing any stdout — mirrors zcode emitting nothing until the final envelope.
+  // 睡 2 秒、不写任何 stdout —— 对应 zcode 直到最终信封才输出。
+  const exec = nodeExecutor(`await new Promise(r=>setTimeout(r,2000));`);
+  const opts = freshOpts({ idleTimeoutMs: 100 });
+  await assert.rejects(
+    () => exec(opts),
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Idle fired, and because no stdout was seen, the message explains why it's misleading.
+      // idle 触发了，且由于没见到任何 stdout，消息解释了它为何具有误导性。
+      assert.match(msg, /idle timeout/);
+      assert.match(msg, /single-envelope/);
+      return true;
+    },
+  );
+});
+
+test("subprocess: unsetEnv removes keys from the child environment", async () => {
+  const exec = makeSubprocessExecutor({
+    command: process.execPath,
+    prepare: async () => ({
+      args: [
+        "-e",
+        `const hit = process.env.GROK_PLUGIN_ROOT; process.stdout.write(JSON.stringify({type:'done',text: hit === undefined ? 'unset' : hit})+'\\n');`,
+      ],
+      env: { ODW_GROK_LEAF: "1" },
+      unsetEnv: ["GROK_PLUGIN_ROOT"],
+    }),
+    parseLine: (line: string): unknown | null => {
+      const t = line.trim();
+      if (!t) return null;
+      try {
+        return JSON.parse(t);
+      } catch {
+        return null;
+      }
+    },
+    reduce: (events): ExecResultCore => {
+      const last = events[events.length - 1] as { text?: unknown } | undefined;
+      return {
+        text: String(last?.text ?? ""),
+        sessionId: null,
+        costUsd: 0,
+        resultSubtype: "success",
+        isError: false,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    },
+  });
+  const prev = process.env.GROK_PLUGIN_ROOT;
+  process.env.GROK_PLUGIN_ROOT = "/should/not/leak";
+  try {
+    const res = await exec(freshOpts());
+    assert.equal(res.text, "unset");
+  } finally {
+    if (prev === undefined) delete process.env.GROK_PLUGIN_ROOT;
+    else process.env.GROK_PLUGIN_ROOT = prev;
+  }
+});
+
+test("subprocess: idle timeout after activity (stdout seen, then silent) does NOT add the single-envelope note", async () => {
+  // Prints one event, then goes silent for 2s — stdout WAS seen, so this is a genuine stall after
+  // activity, not the single-envelope trap. The idle timer fires because no further stdout resets it.
+  // 先打印一个事件，再沉默 2 秒 —— stdout【曾经】到达，所以这是「活动后的真正停滞」，不是单信封陷阱。
+  // 由于没有后续 stdout 来重置，idle 计时器触发。
+  const exec = nodeExecutor(
+    `process.stdout.write(JSON.stringify({type:'started'})+'\\n');await new Promise(r=>setTimeout(r,2000));`,
+  );
+  const opts = freshOpts({ idleTimeoutMs: 150 });
+  await assert.rejects(
+    () => exec(opts),
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      assert.match(msg, /idle timeout/);
+      assert.doesNotMatch(msg, /single-envelope/);
+      return true;
+    },
+  );
 });

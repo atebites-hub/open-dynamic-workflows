@@ -23,6 +23,13 @@ import type {
 import { keyFor } from "../journal/journal.js";
 import { assertObjectRootSchema, validateAgainstSchema } from "../schema/validate.js";
 import type { Semaphore } from "./semaphore.js";
+import {
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_RETRY_BACKOFF_MS,
+  abortableSleep,
+  backoffDelayMs,
+  isRetriable,
+} from "./retry.js";
 
 export interface HookDeps {
   semaphore: Semaphore;
@@ -103,14 +110,15 @@ function cleanupWorktree(repoCwd: string, wtDir: string): void {
 
 export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
   const agent = async (prompt: string, opts?: AgentOptions): Promise<unknown> => {
-    // `executor` is required in the public AgentOptions type, but the runtime must still
-    // tolerate `agent(prompt)` with no opts at all so it can fail fast with a helpful
-    // message (INVARIANT #10 — no default executor). Model the fallback as Partial so the
-    // "missing executor" path stays reachable and type-checks (o.executor is then string | undefined).
-    // `executor` 在公开的 AgentOptions 类型里是必填的，但运行时仍须容忍完全不传 opts 的
-    // `agent(prompt)`，以便 fail fast 给出有用的报错（不变量 #10——没有默认 executor）。
-    // 把回退建模为 Partial，使「缺 executor」分支可达且能通过类型检查（此时 o.executor 为 string | undefined）。
-    const o: Partial<AgentOptions> = opts ?? {};
+    // `executor` is required in the public AgentOptions type unless the host set
+    // RunOptions.defaultExecutor (Grok-hosted plugin only). Tolerate `agent(prompt)`
+    // with no opts so the missing-executor path stays reachable (INVARIANT #10).
+    // `executor` 在公开 AgentOptions 里是必填的，除非 host 设置了 RunOptions.defaultExecutor
+    //（仅 Grok 托管插件）。容忍不传 opts 的 `agent(prompt)`，使「缺 executor」分支可达（不变量 #10）。
+    const o: Partial<AgentOptions> = { ...(opts ?? {}) };
+    if (!o.executor && ctx.defaultExecutor) {
+      o.executor = ctx.defaultExecutor;
+    }
     const key = keyFor(prompt, o);
     let id: number;
     try {
@@ -165,6 +173,7 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
         signal: ctx.abort,
         tracePath: path.join(ctx.runDir, "agents", `agent-${id}.jsonl`),
         ...(resolvedModel !== undefined ? { model: resolvedModel } : {}),
+        ...(o.reasoningEffort !== undefined ? { reasoningEffort: o.reasoningEffort } : {}),
         ...(o.schema !== undefined ? { schema: o.schema } : {}),
         ...(appendSystemPrompt !== undefined ? { appendSystemPrompt } : {}),
         ...(ctx.agentTimeoutMs !== undefined ? { timeoutMs: ctx.agentTimeoutMs } : {}),
@@ -189,7 +198,33 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
         );
       }
 
-      const res = await executor(execOpts);
+      // Retry transient failures (error_during_execution: CLI crash / "Turn execution failed" /
+      // network blip). Permanent failures (schema validation below, exhausted turn budgets) are not
+      // retried — isRetriable() returns false for them. Each retry waits an exponentially-growing
+      // backoff (deterministic, no Math.random). The loop resolves the first NON-retried result —
+      // success OR a permanent failure OR the last attempt after exhausting the budget — and the
+      // schema/isError checks below run exactly once on that final result.
+      // 重试瞬时失败（error_during_execution：CLI 崩溃 / "Turn execution failed" / 网络抖动）。永久
+      // 失败（下方的 schema 校验、轮数耗尽）不重试——isRetriable() 对它们返回 false。每次重试前等待
+      // 指数增长的退避（确定性，无 Math.random）。循环 resolve 出第一个【不重试】的结果——成功、或
+      // 永久失败、或耗尽预算后的最后一次尝试——下方 schema/isError 检查只对该最终结果跑一次。
+      const maxRetries = o.retries ?? ctx.maxRetries ?? DEFAULT_MAX_RETRIES;
+      const backoffMs = ctx.retryBackoffMs ?? DEFAULT_RETRY_BACKOFF_MS;
+      let res = await executor(execOpts);
+      for (let attempt = 1; isRetriable(res) && attempt <= maxRetries; attempt++) {
+        // Backoff respects abort: a cancelled run unwinds immediately instead of sleeping through.
+        // 退避感知 abort：被取消的 run 立即回退，而非熬完整段退避。
+        await abortableSleep(backoffDelayMs(attempt, backoffMs), ctx.abort);
+        res = await executor(execOpts);
+      }
+      // Bug C: count tokens ONCE, for the final result only. Previously addTokens ran before the
+      // error check, so a failed attempt's tokens were counted while its agent_end event showed 0 —
+      // and with retry, multiple failed attempts would have summed. Now a failed-then-succeeded
+      // agent counts only the successful attempt; a permanently-failed agent counts its (failed)
+      // attempt consistently with its agent_end event.
+      // Bug C：只对最终结果计数一次 token。此前 addTokens 在错误检查之前执行，故失败尝试的 token 被
+      // 计入、而其 agent_end 事件却显示 0——加上重试，多次失败尝试还会累加。现在「先失败后成功」的
+      // agent 只计成功那次；永久失败的 agent 计其（失败的）那次，与其 agent_end 事件一致。
       ctx.addTokens(res.usage.outputTokens);
 
       let value: unknown;

@@ -56,3 +56,56 @@ export function assertObjectRootSchema(schema: JsonSchema): void {
     );
   }
 }
+
+/**
+ * Doc-only keywords dropped when a schema is stringified into a prompt/argv for CLIs that lack a
+ * native structured-output flag (zcode). `description`, `title`, `examples`, `$comment`, and
+ * `default` bloat the prompt — which for zcode rides on argv (no stdin), approaching the ~256KB
+ * OS argv ceiling — without changing what the model is asked to produce. Structural keywords
+ * (type/properties/required/items/enum/format/etc.) are all preserved. Returns a NEW object; the
+ * input is untouched. Recurses into object-valued keywords (properties, items, anyOf, …) so
+ * descriptions nested deep in the schema are also removed.
+ *
+ * 把 schema 序列化进 prompt/argv 时（针对没有原生结构化输出 flag 的 CLI，如 zcode）需要丢弃的
+ * 纯文档关键字。`description`、`title`、`examples`、`$comment`、`default` 会让 prompt 膨胀——对
+ * zcode 而言它走 argv（无 stdin），逼近 OS 约 256KB 的 argv 上限——却不会改变要求模型产出的内容。
+ * 结构性关键字（type/properties/required/items/enum/format 等）全部保留。返回一个新对象；不修改入参。
+ * 会递归进入对象型关键字（properties、items、anyOf …），从而深层嵌套的 description 也被移除。
+ */
+const DOC_KEYWORDS = new Set(["description", "title", "examples", "$comment", "default"]);
+
+export function compactSchema(schema: JsonSchema): JsonSchema {
+  return compactValue(schema) as JsonSchema;
+}
+
+function compactValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(compactValue);
+  }
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(obj)) {
+    if (DOC_KEYWORDS.has(key)) continue;
+    out[key] = compactValue(child);
+  }
+  return out;
+}
+
+/**
+ * Stringify a schema for prompt/argv injection: compacted (doc keywords dropped) and length-capped.
+ * If the compacted JSON still exceeds `maxChars`, it is truncated with a visible note so the model
+ * sees that the schema is partial — preferable to silently blowing past the argv ceiling. The
+ * default cap leaves generous headroom under the ~256KB OS argv limit.
+ *
+ * 把 schema 序列化以注入 prompt/argv：先压缩（去掉文档关键字），再做长度收口。若压缩后的 JSON
+ * 仍超过 `maxChars`，则带可见提示地截断——让模型知道 schema 不完整——优于默默突破 argv 上限。
+ * 默认上限在 OS 约 256KB 的 argv 限制下留有充裕余量。
+ */
+export function compactSchemaToJson(schema: JsonSchema, maxChars = 200_000): string {
+  const json = JSON.stringify(compactSchema(schema));
+  if (json.length <= maxChars) return json;
+  return json.slice(0, maxChars) + '\n…(schema truncated: it exceeded the prompt/argv budget; follow the visible structure)';
+}

@@ -8,8 +8,8 @@
 
 一段 **JS workflow 脚本**（`export const meta` + 用 `agent()/parallel()/pipeline()/phase()/log()/args/workflow()` 写的 body）**由模型撰写**（对照 `skills/open-dynamic-workflows/SKILL.md`），本项目的**运行时执行它**——fan-out subagent、返回脚本返回值 + run 元数据、维护可 resume 的 journal。我们不替用户写脚本。
 
-- **模型 / harness 无关**：`Executor` 是集成接缝；**每个 CLI 一个适配器**（`claude` / `codex` 各一），可换成任意模型 / harness。
-- **executor 是 per-node 可插拔的**：host 通过 `RunOptions.executors`（一个 `name → Executor` 的注册表）提供实现，脚本里每个 `agent()` 用 `{executor}` 按名挑一个 CLI——**没有默认值，必须显式指定**。
+- **模型 / harness 无关**：`Executor` 是集成接缝；**每个 CLI 一个适配器**（`grok` / `claude` / `codex` / `zcode`），可换成任意模型 / harness。
+- **executor 是 per-node 可插拔的**：host 通过 `RunOptions.executors`（一个 `name → Executor` 的注册表）提供实现，脚本里每个 `agent()` 用 `{executor}` 按名挑一个 CLI——**默认 fail-fast 必须显式指定**；host 可设 `RunOptions.defaultExecutor`（Grok 托管插件设为 `zcode`）。
 - **撰写引导是一份 skill**（`skills/open-dynamic-workflows/SKILL.md`，英/中），不绑死任何 harness。
 - **「hook」一词**（`agent`/`parallel`/… 这些注入脚本作用域的原语）来自**官方工具规范**的 "Script body hooks" 段；与 Claude Code 生命周期 hook（`PreToolUse` 等）无关。
 
@@ -24,16 +24,22 @@
 ```
 src/
 ├── types.ts              ← 冻结契约；Executor 接缝 / RunOptions.executors / WorkflowResult
-├── index.ts              ← 公共导出：runWorkflow + claude/codex 适配器 + reducer + builtinExecutors + types
+├── index.ts              ← 公共导出：runWorkflow + claude/codex/zcode 适配器 + reducer + builtinExecutors + types
 ├── cli.ts                ← CLI 入口（bin: odw / open-dynamic-workflows；把 builtinExecutors 注入 run；无 --executor flag，因无默认）
 ├── executor/             ← 每个 CLI 一个子目录;subprocess.ts 是它们共享的 CLI 无关 driver
 │   ├── subprocess.ts     ← CLI 无关的流式子进程 driver（spawn / 进程组 kill / wall+idle+abort 看门狗 / 行缓冲 / stdin / ExecTrace 落盘 / ODW_DEBUG）；接新 CLI = 在自己的子目录写一个 spec
 │   ├── claude/
 │   │   ├── claude.ts     ← spawn claude --print，唯一碰 claude 的地方（走 subprocess driver）
 │   │   └── stream-json.ts ← claude stream-json 事件的纯 reducer
-│   └── codex/
-│       ├── codex.ts      ← spawn codex exec --json，唯一碰 codex 的地方（走 subprocess driver）
-│       └── codex-jsonl.ts ← codex JSONL 事件的纯 reducer
+│   ├── codex/
+│   │   ├── codex.ts      ← spawn codex exec --json，唯一碰 codex 的地方（走 subprocess driver）
+│   │   └── codex-jsonl.ts ← codex JSONL 事件的纯 reducer
+│   ├── grok/
+│   │   ├── grok.ts       ← spawn grok -p，唯一碰 grok 的地方（走 subprocess driver）
+│   │   └── grok-json.ts  ← grok --output-format json / streaming-json 的纯 reducer
+│   └── zcode/
+│       ├── zcode.ts      ← spawn zcode --prompt（ZCODE_ODW_PROTOCOL=1），唯一碰 zcode 的地方（走 subprocess driver）
+│       └── zcode-envelope.ts ← zcode ODW 信封（单个 zcode_result JSON）的纯 reducer
 ├── schema/validate.ts    ← ajv + --json-schema 构造 + 根必须 object 守卫
 ├── runtime/
 │   ├── semaphore.ts      ← 并发信号量 + 全局 agent 计数 + abort
@@ -44,11 +50,11 @@ src/
 └── progress/tree.ts      ← ProgressEvent → 终端实时进度树
 ```
 
-**一次 run 的数据流**：`runWorkflow()` → `sandbox` 抽 `meta`、在 `node:vm` 跑脚本体 → 脚本调注入的 hooks（`hooks.ts`）→ 每个 `agent()` 过 `semaphore` 限流后，按其 `{executor}` 名字从 `ctx.executors` 注册表解析出对应 `Executor`（缺失 / 未知名即 throw），由它 spawn 对应 CLI（`claude --print` 或 `codex exec --json`）→ 结果经 `journal` 落盘 + `ProgressEvent` 流给 `progress/tree.ts`。**脚本怎么写不在 `src/`**——见 `skills/open-dynamic-workflows/SKILL.md`。
+**一次 run 的数据流**：`runWorkflow()` → `sandbox` 抽 `meta`、在 `node:vm` 跑脚本体 → 脚本调注入的 hooks（`hooks.ts`）→ 每个 `agent()` 过 `semaphore` 限流后，按其 `{executor}` 名字从 `ctx.executors` 注册表解析出对应 `Executor`（缺失 / 未知名即 throw），由它 spawn 对应 CLI（`claude --print`、`codex exec --json` 或 `zcode --prompt`）→ 结果经 `journal` 落盘 + `ProgressEvent` 流给 `progress/tree.ts`。**脚本怎么写不在 `src/`**——见 `skills/open-dynamic-workflows/SKILL.md`。
 
 ## 不变量（违反就是 bug）
 
-1. **每个 `Executor` 是唯一接触其 CLI 的接缝**——`executor/claude.ts` 只碰 `claude`、`executor/codex.ts` 只碰 `codex`；其余模块全是对 `Promise<ExecResult>` 的纯编排。
+1. **每个 `Executor` 是唯一接触其 CLI 的接缝**——`executor/claude.ts` 只碰 `claude`、`executor/codex.ts` 只碰 `codex`、`executor/zcode.ts` 只碰 `zcode`；其余模块全是对 `Promise<ExecResult>` 的纯编排。
 2. **`pipeline()` 阶段间无 barrier**——绝不 `await` 完整个 stage N 再开 N+1。
 3. **`parallel()` 永不 reject**——失败位填 `null`。
 4. **并发 ≤ `min(16, cpus-2)`、总 agent ≤ 1000**；信号量在错误路径也要 release。
@@ -57,8 +63,10 @@ src/
 7. **journal 写盘失败只 warn，永不 throw。**
 8. **spawn claude 用 `--permission-mode acceptEdits`，绝不用 `--dangerously-skip-permissions`。**
 9. **journal 是 CLI 中立的**——只存归约后的 `result`（string | object | null），绝不存 claude stream-json / codex JSONL 原文；resume 重放 = 重发存下来的值，**不 spawn 任何 CLI**（新增 executor 不改 journal 格式）。
-10. **没有默认 executor**——`agent()` 必须显式带 `{executor}`；缺失或未知名（不在 `executors` 注册表里）即 throw，**绝不静默回退**。
+10. **没有隐式默认 executor**——`agent()` 必须显式带 `{executor}`，除非 host 设置了 `RunOptions.defaultExecutor`（仅 Grok 托管插件设为 `zcode`）。未知名（不在 `executors` 注册表里）即 throw，**绝不静默回退到未声明的 CLI**。
 11. **spawn codex 用 `--sandbox workspace-write`，绝不用 `--dangerously-bypass-approvals-and-sandbox`**（claude 侧不变量 #8 的 codex 对应物）。
+12. **spawn zcode 用 `--mode yolo`（`--prompt` 的文档默认值；headless 无法响应其它模式的权限批准弹窗），并通过 `ZCODE_ODW_PROTOCOL=1` 让 launcher 输出机器可读的 `zcode_result` 信封。zcode 没有 `--dangerously-*` flag 可禁，所以这里不像 #8/#11 那样有"禁用某 flag"条款；但 prompt 必须经 argv（zcode 不读 stdin），结构化输出靠 prompt 注入 + reducer JSON.parse（zcode 无 `--json-schema`/`--output-schema` flag）**（claude #8 / codex #11 的 zcode 对应物）。
+13. **spawn grok 用 `grok -p` + `--output-format json|streaming-json` + `--always-approve` + `--sandbox workspace` + `--no-auto-update`，绝不用 `--tools` allowlist**（已知 0.2.x session-creation bug）。子进程环境设置 `ODW_GROK_LEAF=1` 并去掉 `GROK_PLUGIN_ROOT`，避免嵌套 grok 再次加载本插件 MCP。
 
 ## 常用命令
 

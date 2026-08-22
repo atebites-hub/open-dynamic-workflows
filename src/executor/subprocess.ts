@@ -68,6 +68,9 @@ export interface SubprocessSpec {
     args: string[];
     stdin?: string;
     env?: Record<string, string>;
+    /** Keys removed after the env merge so a nested CLI cannot re-import this plugin. */
+    /** 在合并环境变量后再删除的键，避免嵌套 CLI 再次导入本插件。 */
+    unsetEnv?: string[];
     cleanup?: () => void | Promise<void>;
   }>;
   /** Parse one stdout line into an event object, or null to skip it. */
@@ -115,7 +118,7 @@ export interface ExecTrace {
 async function writeTrace(tracePath: string, trace: ExecTrace): Promise<void> {
   try {
     await mkdir(dirname(tracePath), { recursive: true });
-    await writeFile(tracePath, JSON.stringify(trace, null, 2));
+    await writeFile(tracePath, JSON.stringify(trace, null, 2), { mode: 0o600 });
   } catch (err) {
     console.warn(`[${trace.command}] trace write failed (${tracePath}):`, err);
   }
@@ -170,7 +173,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
       // prepare() 是异步的（可能写临时文件）；之后才 spawn。
       void spec
         .prepare(opts)
-        .then(({ args, stdin, env, cleanup }) => {
+        .then(({ args, stdin, env, unsetEnv, cleanup }) => {
           cleanupFn = cleanup;
 
           // If the signal already aborted while prepare() was in flight, bail before spawning.
@@ -183,9 +186,18 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           }
 
           dbg(`spawn: ${spec.command} ${args.join(" ")} (cwd=${opts.cwd})`);
+          const childEnv: NodeJS.ProcessEnv = {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: "0",
+            ...opts.env,
+            ...env,
+          };
+          if (unsetEnv) {
+            for (const key of unsetEnv) delete childEnv[key];
+          }
           const child = spawn(spec.command, args, {
             cwd: opts.cwd,
-            env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...opts.env, ...env },
+            env: childEnv,
             stdio: ["pipe", "pipe", "pipe"],
             // New process group: the CLI may spawn its own children (MCP servers, tool
             // 新建进程组：CLI 可能派生它自己的子进程（MCP server、工具
@@ -217,6 +229,16 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           const events: unknown[] = [];
           let stdoutBuf = "";
           let stderrBuf = "";
+          // Bug 3: track whether the child ever produced stdout. Single-envelope executors (zcode
+          // in ODW-protocol mode prints ONE terminal line) emit nothing for the whole run, so the
+          // idle watchdog — armed only on stdout arrival — fires immediately and kills a healthy
+          // agent. When an idle timeout fires with zero stdout, we append an explanatory note so the
+          // failure names the real cause instead of looking like a genuine hang.
+          // Bug 3：追踪子进程是否曾输出过 stdout。单信封型执行器（zcode 在 ODW-protocol 模式下
+          // 只打印【一行】终止信封）整个运行期间不产生任何输出，于是仅在 stdout 到达时才重新计时的
+          // idle 看门狗会立刻触发，杀掉一个健康的 agent。当 idle 超时且零 stdout 时，追加一段说明，
+          // 让失败点出真正的成因，而不是看起来像一次真正的卡死。
+          let sawStdout = false;
 
           const onAbort = (): void => {
             if (settled) return;
@@ -249,13 +271,25 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           // 墙钟超时。
           wallTimer = setTimeout(() => fail(`${spec.command} timeout`), timeoutMs);
 
-          // Idle (stdout-arrival) watchdog.
-          // idle（以 stdout 到达为准）看门狗。
+          // Idle (stdout-arrival) watchdog. NOTE: this is a STREAM-based idle — it resets only when
+          // stdout bytes arrive. For single-envelope executors that emit nothing until the end (zcode
+          // in ODW-protocol mode), idleTimeoutMs is ineffective and will kill a healthy run; rely on
+          // the wall timeout for those. When it does fire with no stdout, the message says so.
+          // idle（以 stdout 到达为准）看门狗。注意：这是【基于流】的 idle —— 只在 stdout 字节到达时
+          // 才重置计时。对于直到结束才输出内容的单信封型执行器（zcode 在 ODW-protocol 模式下），
+          // idleTimeoutMs 无效，会杀掉健康的运行；这类情况请依赖 wall 超时。当它确实在零 stdout 下
+          // 触发时，消息里会说明这一点。
           const armIdle = (): void => {
             if (opts.idleTimeoutMs === undefined) return;
             if (idleTimer) clearTimeout(idleTimer);
             idleTimer = setTimeout(
-              () => fail(`${spec.command} idle timeout`),
+              () =>
+                fail(
+                  `${spec.command} idle timeout` +
+                    (sawStdout
+                      ? ""
+                      : " (no stdout received — for single-envelope executors like zcode, idleTimeoutMs is stream-based and ineffective; use the wall timeout)"),
+                ),
               opts.idleTimeoutMs,
             );
           };
@@ -276,6 +310,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
 
           child.stdout.setEncoding("utf8");
           child.stdout.on("data", (chunk: string) => {
+            sawStdout = true;
             armIdle();
             consume(chunk);
           });

@@ -16,7 +16,7 @@ const USAGE =
   "usage: odw run <scriptPath> [--name <name>] [--args <json>] " +
   "[--resume <runId>] [--cwd <dir>] [--model <id>] " +
   "[--run-dir <dir>] [--no-tree]\n" +
-  "\nScripts must pick a CLI per node: every agent() needs {executor:'claude'|'codex'}.\n";
+  "\nScripts must pick a CLI per node: every agent() needs {executor:'grok'|'claude'|'codex'|'zcode'} unless the host supplies a default.\n";
 
 // Flags that take a following value; everything else is boolean or positional.
 // 需要紧跟一个取值的 flag；其余都按布尔 flag 或位置参数处理。
@@ -143,8 +143,10 @@ async function main(): Promise<void> {
     const res = await runWorkflow(opts);
     tree.stop();
     process.stdout.write(`${JSON.stringify(res.value ?? null, null, 2)}\n`);
+    const advisoryFailures = (res.failedAgents ?? 0) + (res.failedWorkflows ?? 0);
     process.stderr.write(
-      `\n[done] run=${res.runId} agents=${res.agentCount} tokens=${res.tokensSpent} ${res.durationMs}ms\n`,
+      `\n[done] run=${res.runId} agents=${res.agentCount} tokens=${res.tokensSpent} ${res.durationMs}ms` +
+        (advisoryFailures > 0 ? ` · ${advisoryFailures} agent/workflow failure(s) swallowed by the script (run still ok)\n` : "\n"),
     );
     process.exit(res.ok ? 0 : 1);
   } catch (e) {
