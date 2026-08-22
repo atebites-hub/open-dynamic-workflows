@@ -121,6 +121,7 @@ export function buildZcodeArgs(opts: ExecOptions): string[] {
     "yolo",
   ];
   if (opts.model) args.push("--model", opts.model);
+  if (opts.reasoningEffort) args.push("--reasoning-effort", opts.reasoningEffort);
   if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
   return args;
 }
@@ -148,6 +149,8 @@ function reduceZcode(
 ): ExecResultCore {
   const outcome = reduceZcodeEnvelope(events as any[], {
     schema: ctx.opts.schema !== undefined,
+    ...(ctx.opts.effectiveRoute !== undefined ? { effectiveRoute: ctx.opts.effectiveRoute } : {}),
+    ...(ctx.opts.routingPolicyFingerprint !== undefined ? { routingPolicyFingerprint: ctx.opts.routingPolicyFingerprint } : {}),
   });
 
   const core: ExecResultCore = {

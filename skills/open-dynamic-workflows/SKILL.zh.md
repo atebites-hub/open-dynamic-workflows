@@ -57,13 +57,17 @@ export const meta = {
 
 - **`agent(prompt, opts?) → Promise<any>`** —— 启动一个 subagent。不带 `schema` 时解析为它的最终文本;
   带 `schema`(一个 JSON Schema)时,subagent 被强制产出符合的对象,`agent()` 解析为**校验后的对象**。
-  被跳过 / 中止则返回 `null`(用 `.filter(Boolean)` 过滤)。`opts`:`executor`(**必填**——按名字
+  被跳过 / 中止则返回 `null`(用 `.filter(Boolean)` 过滤)。`opts`:`executor`（除非 run 有 routing policy，否则必填——按名字
   从 host 提供的注册表里挑出运行本 node 的 agent CLI,如 `'claude'`、`'codex'` 或 `'zcode'`;未知名会让整个 run 失败)、
   `label`(简短显示名)、`phase`(指定进度分组——**在 parallel/pipeline 的 stage 里务必显式传**)、
   `schema`、`model`(覆盖;省略则继承)、`reasoningEffort`(Codex 覆盖;覆盖 model 时默认 `medium`)、
   `isolation:'worktree'`(给该 agent 开独立 git worktree——
   **昂贵**,仅当并行改文件会冲突时用)、`agentType`(具名 subagent 预设)。
   每个 node 各自指定 executor——**没有默认值**,所以同一段脚本里不同 node 可以跑不同的 CLI(见下方 per-node 例子)。
+  Host 也可以在 `runWorkflow({ routingPolicy: { executor, model, reasoningEffort } })` 中绑定一次不可变路由。
+  节点省略的路由字段会继承它，显式冲突会在缓存查询和启动前失败；嵌套 workflow 继承同一策略。
+  策略在 journal 打开前规范化并计算指纹，不能与 `resumeFromRunId` 同时使用；它是关联证据而非 host attestation。
+  不提供策略时，原有行为保持不变。
 - **`pipeline(items, stage1, stage2, …) → Promise<any[]>`** —— 每个 item 独立流过所有 stage,
   **阶段间无 barrier**(item A 可在 stage 3,item B 还在 stage 1)。每个 stage 回调收到
   `(prevResult, originalItem, index)`。某 stage 抛错 → 该 item 落 `null` 并跳过其余 stage。

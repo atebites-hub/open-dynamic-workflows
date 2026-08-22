@@ -89,6 +89,55 @@ test("(1) happy path: exitCode 0 → text extracted, isError=false, subtype=succ
   assert.equal(outcome.structuredOutput, undefined);
 });
 
+test("policy envelope requires exactly one matching ODW runtime attestation", () => {
+  const attestation: Record<string, unknown> = {
+    type: "zcode_runtime_attestation",
+    schemaVersion: 1,
+    executor: "zcode",
+    route: "odw",
+    runtimeId: "runtime-1",
+    runtimeVersion: "0.1.0",
+    sessionId: "runtime-1",
+    role: "main",
+    parentSessionId: null,
+    policySource: null,
+    rolePolicy: null,
+    rolePolicyFingerprint: null,
+    model: "zai/glm",
+    reasoningEffort: "high",
+  };
+  const envelopeWithAttestation = envelope({ sessionId: "runtime-1", runtimeAttestation: attestation as never });
+  const policy = { executor: "zcode", model: "zai/glm", reasoningEffort: "high" } as const;
+  const reduce = (lines: string[], fingerprint = "a".repeat(64)) => reduceZcodeEnvelope(eventsFromLines(lines), {
+    effectiveRoute: policy,
+    routingPolicyFingerprint: fingerprint,
+  });
+  const ok = reduce([envelopeWithAttestation]);
+  assert.equal(ok.isError, false);
+
+  const invalid = (over: Record<string, unknown>) => envelope({
+    sessionId: "runtime-1",
+    runtimeAttestation: { ...attestation, ...over } as never,
+  });
+  for (const [name, lines, fingerprint] of [
+    ["missing", [envelope({ sessionId: "runtime-1" })], "a".repeat(64)],
+    ["duplicate", [envelopeWithAttestation, envelopeWithAttestation], "a".repeat(64)],
+    ["wrong schema", [invalid({ schemaVersion: 2 })], "a".repeat(64)],
+    ["empty runtime version", [invalid({ runtimeVersion: "" })], "a".repeat(64)],
+    ["fallback runtime version", [invalid({ runtimeVersion: "unknown" })], "a".repeat(64)],
+    ["wrong executor", [invalid({ executor: "codex" })], "a".repeat(64)],
+    ["runtime id mismatch", [invalid({ runtimeId: "other" })], "a".repeat(64)],
+    ["model mismatch", [invalid({ model: "other" })], "a".repeat(64)],
+    ["effort mismatch", [invalid({ reasoningEffort: "low" })], "a".repeat(64)],
+    ["wrong role", [invalid({ role: "lite" })], "a".repeat(64)],
+    ["wrong parent", [invalid({ parentSessionId: "parent" })], "a".repeat(64)],
+    ["missing fingerprint", [envelopeWithAttestation], ""],
+    ["malformed fingerprint", [envelopeWithAttestation], "A".repeat(64)],
+  ] as const) {
+    assert.equal(reduce([...lines], fingerprint).isError, true, name);
+  }
+});
+
 // ────────────────────────────────────────────────────────────────────────────
 // (2) schema: envelope.text is a JSON string → structuredOutput parsed
 // (2) schema：信封 text 是一段 JSON 字符串 → structuredOutput 被解析出来

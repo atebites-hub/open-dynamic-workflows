@@ -111,6 +111,13 @@ export interface ExecTrace {
   resultSubtype: string;
   stderr: string;
   events: unknown[];
+  routing?: {
+    policyFingerprint: string;
+    executor: string;
+    model: string;
+    reasoningEffort: string;
+    runtimeId: string | null;
+  };
 }
 
 /** Best-effort trace write. Never rejects — a debug artifact must not fail the run. */
@@ -388,6 +395,17 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
                 resultSubtype: core.resultSubtype,
                 stderr: stderrBuf,
                 events,
+                ...(opts.routingPolicyFingerprint !== undefined && opts.effectiveRoute !== undefined
+                  ? {
+                      routing: {
+                        policyFingerprint: opts.routingPolicyFingerprint,
+                        executor: opts.effectiveRoute.executor,
+                        model: opts.effectiveRoute.model,
+                        reasoningEffort: opts.effectiveRoute.reasoningEffort,
+                        runtimeId: core.sessionId ?? null,
+                      },
+                    }
+                  : {}),
               }).then(finish);
             } else {
               finish();

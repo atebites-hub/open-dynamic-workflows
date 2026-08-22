@@ -25,7 +25,7 @@ import {
 // executors do — including the stderr fallback on an error result with empty text.
 // 一个“CLI”是 `node -e <body>` 的执行器。body 往 stdout 打 JSONL、往 stderr 打文本、
 // 以任意退出码退出。reduce() 像真实执行器那样折叠事件——含错误且 text 为空时的 stderr 兜底。
-function nodeExecutor(body: string) {
+function nodeExecutor(body: string, sessionId: string | null = null) {
   return makeSubprocessExecutor({
     command: process.execPath, // node
     prepare: async (_opts: ExecOptions) => ({ args: ["-e", body] }),
@@ -46,7 +46,7 @@ function nodeExecutor(body: string) {
       const ok = last?.type === "done" && ctx.exitCode === 0;
       const core: ExecResultCore = {
         text: ok ? String(last?.text ?? "") : "",
-        sessionId: null,
+        sessionId,
         costUsd: 0,
         resultSubtype: ok ? "success" : "error_during_execution",
         isError: !ok,
@@ -103,6 +103,61 @@ test("subprocess: a nonzero-exit, stderr-only failure surfaces stderr AND record
   assert.equal(trace.exitCode, 1);
   assert.match(trace.stderr, /usage limit/);
   assert.equal(trace.events.length, 0);
+});
+
+test("subprocess: policy trace records the effective route and runtime id without prompt content", async () => {
+  const exec = nodeExecutor(`process.stdout.write(JSON.stringify({type:'done',text:'ok'})+'\\n');`, "runtime-42");
+  const opts = freshOpts({
+    routingPolicyFingerprint: "a".repeat(64),
+    effectiveRoute: { executor: "fake", model: "model-a", reasoningEffort: "high" },
+  });
+  const res = await exec(opts);
+  assert.equal(res.isError, false);
+  const trace = JSON.parse(readFileSync(opts.tracePath as string, "utf8")) as ExecTrace;
+  assert.deepEqual(trace.routing, {
+    policyFingerprint: "a".repeat(64),
+    executor: "fake",
+    model: "model-a",
+    reasoningEffort: "high",
+    runtimeId: "runtime-42",
+  });
+  assert.equal(JSON.stringify(trace.routing).includes("hello"), false);
+});
+
+test("subprocess: unpolicy traces omit routing evidence", async () => {
+  const opts = freshOpts();
+  await nodeExecutor(`process.stdout.write(JSON.stringify({type:'done',text:'ok'})+'\\n');`)(opts);
+  const trace = JSON.parse(readFileSync(opts.tracePath as string, "utf8")) as ExecTrace;
+  assert.equal(trace.routing, undefined);
+});
+
+test("subprocess: failed policy traces retain the requested route and observed runtime id", async () => {
+  const exec = nodeExecutor(`process.stderr.write('failed');process.stdout.write(JSON.stringify({type:'bad'})+'\\n');process.exit(1);`, "runtime-failed");
+  const opts = freshOpts({
+    routingPolicyFingerprint: "b".repeat(64),
+    effectiveRoute: { executor: "fake", model: "model-b", reasoningEffort: "low" },
+  });
+  const res = await exec(opts);
+  assert.equal(res.isError, true);
+  const trace = JSON.parse(readFileSync(opts.tracePath as string, "utf8")) as ExecTrace;
+  assert.deepEqual(trace.routing, {
+    policyFingerprint: "b".repeat(64),
+    executor: "fake",
+    model: "model-b",
+    reasoningEffort: "low",
+    runtimeId: "runtime-failed",
+  });
+});
+
+test("subprocess: policy trace records null runtime id when executor returns none", async () => {
+  const exec = nodeExecutor(`process.stdout.write(JSON.stringify({type:'done',text:'ok'})+'\\n');`);
+  const opts = freshOpts({
+    routingPolicyFingerprint: "c".repeat(64),
+    effectiveRoute: { executor: "fake", model: "model-c", reasoningEffort: "medium" },
+  });
+  await exec(opts);
+  const trace = JSON.parse(readFileSync(opts.tracePath as string, "utf8")) as ExecTrace;
+  assert.equal(trace.routing?.runtimeId, null);
 });
 
 // ────────────────────────────────────────────────────────────────────────────

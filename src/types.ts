@@ -40,9 +40,9 @@ export interface WorkflowMeta {
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface AgentOptions {
-  /** Required: names one key of RunOptions.executors. Enforced at runtime — missing or unknown throws. */
-  /** 必填：指向 RunOptions.executors 的某个 key。运行时强制——缺失或未知则 throw。 */
-  executor: string;
+  /** Names one key of RunOptions.executors; a run routingPolicy may supply it. */
+  /** 指向 RunOptions.executors 的某个 key；run routingPolicy 可为其提供默认值。 */
+  executor?: string;
   /** Display label; defaults to a truncated prompt or `agent-N`. */
   /** 显示标签；默认取截断后的 prompt 或 `agent-N`。 */
   label?: string;
@@ -140,6 +140,8 @@ export interface ExecOptions {
   /** 写入原始 stream-json trace 的路径，用于调试。 */
   tracePath?: string;
   signal?: AbortSignal;
+  routingPolicyFingerprint?: string;
+  effectiveRoute?: Readonly<RoutingPolicy>;
 }
 
 export type ResultSubtype =
@@ -168,13 +170,26 @@ export interface ExecResult {
 /** executor 函数签名；唯一直接接触 `claude` 的东西。 */
 export type Executor = (opts: ExecOptions) => Promise<ExecResult>;
 
+export interface RoutingPolicy {
+  readonly executor: string;
+  readonly model: string;
+  readonly reasoningEffort: string;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // progress events
 // 进度事件
 // ────────────────────────────────────────────────────────────────────────────
 
 export type ProgressEvent =
-  | { type: "run_start"; runId: string; meta: WorkflowMeta; ts: string }
+  | {
+      type: "run_start";
+      runId: string;
+      meta: WorkflowMeta;
+      ts: string;
+      routingPolicy?: Readonly<RoutingPolicy>;
+      routingPolicyFingerprint?: string;
+    }
   | { type: "phase_start"; phase: string; ts: string }
   | {
       type: "agent_start";
@@ -300,6 +315,7 @@ export interface RunOptions {
    * 在 journal 里，所以之后的 resumeFromRunId 会零开销地重放它们。
    */
   signal?: AbortSignal;
+  routingPolicy?: RoutingPolicy;
 }
 
 export interface WorkflowResult {
@@ -323,6 +339,8 @@ export interface WorkflowResult {
   durable: boolean;
   /** Journal write diagnostics, safe to expose without credentials. */
   journalErrors: string[];
+  routingPolicy?: Readonly<RoutingPolicy>;
+  routingPolicyFingerprint?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -375,6 +393,8 @@ export interface RunContext {
   /** Accumulate output tokens for the run's tokensSpent metric (observability only; no ceiling). */
   /** 累加输出 token 用于本次 run 的 tokensSpent 观测指标（仅观测，无上限）。 */
   addTokens(n: number): void;
+  routingPolicy?: Readonly<RoutingPolicy>;
+  routingPolicyFingerprint?: string;
 }
 
 export const TOTAL_AGENT_CAP = 1000;

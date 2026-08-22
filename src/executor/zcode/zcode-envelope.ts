@@ -16,6 +16,7 @@
 // + map. This mirrors codex-jsonl.ts in role, not in complexity.
 
 import { extractJsonObject } from "../../schema/extract-json.js";
+import type { RoutingPolicy } from "../../types.js";
 // 这比 claude stream-json 或 codex JSONL 简单得多：没有事件折叠——至多一行
 // 信封，stdout 上其余内容都是运行时杂音，parseLine 会跳过（返回 null）。
 // 无 I/O、无子进程；只做解析 + 映射。它在角色上对应 codex-jsonl.ts，但复杂度更低。
@@ -45,6 +46,24 @@ export interface ZcodeResultEnvelope {
   /** False until the runtime reports verified machine-readable telemetry. */
   /** 在运行时报出已验证的机器可读遥测之前为 false。 */
   telemetryAvailable: boolean;
+  runtimeAttestation?: ZcodeRuntimeAttestation;
+}
+
+export interface ZcodeRuntimeAttestation {
+  type: "zcode_runtime_attestation";
+  schemaVersion: 1;
+  executor: "zcode";
+  route: "odw";
+  runtimeId: string;
+  runtimeVersion: string;
+  sessionId: string;
+  role: "main";
+  parentSessionId: null;
+  policySource: null;
+  rolePolicy: null;
+  rolePolicyFingerprint: null;
+  model: string;
+  reasoningEffort: string;
 }
 
 /** Folded outcome of a zcode envelope. Mirrors CodexOutcome for symmetry. */
@@ -61,7 +80,11 @@ export interface ZcodeOutcome {
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function toFiniteNumber(v: unknown): number {
@@ -111,17 +134,17 @@ export function parseZcodeEnvelopeLine(line: string): ZcodeResultEnvelope | null
  */
 export function reduceZcodeEnvelope(
   events: unknown[],
-  opts?: { schema?: boolean },
+  opts?: {
+    schema?: boolean;
+    effectiveRoute?: Readonly<RoutingPolicy>;
+    routingPolicyFingerprint?: string;
+  },
 ): ZcodeOutcome {
   // Find the last envelope line (there should be exactly one; "last" is defensive
   // against a runtime that ever prints more than one).
   // 找到最后一条信封行（应当恰好一条；取 "最后一条" 是对运行时偶发多条的防御）。
-  let envelope: ZcodeResultEnvelope | undefined;
-  for (const ev of events) {
-    if (isObject(ev) && ev["type"] === "zcode_result") {
-      envelope = ev as unknown as ZcodeResultEnvelope;
-    }
-  }
+  const envelopes = events.filter((ev): ev is ZcodeResultEnvelope => isObject(ev) && ev["type"] === "zcode_result");
+  const envelope = envelopes.at(-1);
 
   // No envelope at all → the launcher failed before printing one. Treat as an
   // execution error with empty text (the driver's stderr fallback may fill text).
@@ -137,6 +160,41 @@ export function reduceZcodeEnvelope(
       usage: { inputTokens: 0, outputTokens: 0 },
       telemetryAvailable: false,
     };
+  }
+
+  const invalidAttestation = (reason: string): ZcodeOutcome => ({
+    text: `invalid zcode runtime attestation: ${reason}`,
+    sessionId: envelope.sessionId ?? null,
+    costUsd: toFiniteNumber(envelope.costUsd),
+    resultSubtype: "error_during_execution",
+    isError: true,
+    usage: { inputTokens: 0, outputTokens: 0 },
+    telemetryAvailable: false,
+  });
+  if (opts?.effectiveRoute !== undefined) {
+    if (envelopes.length !== 1) return invalidAttestation("expected exactly one result envelope");
+    const attestation = envelope.runtimeAttestation;
+    if (!isObject(attestation)) return invalidAttestation("missing runtime attestation");
+    if (attestation.type !== "zcode_runtime_attestation" || attestation.schemaVersion !== 1
+      || attestation.executor !== "zcode" || attestation.route !== "odw"
+      || attestation.role !== "main" || attestation.parentSessionId !== null
+      || attestation.policySource !== null || attestation.rolePolicy !== null
+      || attestation.rolePolicyFingerprint !== null
+      || !isNonEmptyString(attestation.runtimeVersion)) {
+      return invalidAttestation("malformed runtime attestation");
+    }
+    if (attestation.runtimeVersion === "unknown") return invalidAttestation("fallback runtime version");
+    if (!isNonEmptyString(attestation.runtimeId) || !isNonEmptyString(attestation.sessionId)
+      || attestation.runtimeId !== attestation.sessionId || attestation.runtimeId !== envelope.sessionId) {
+      return invalidAttestation("runtime id mismatch");
+    }
+    if (opts.effectiveRoute.executor !== "zcode") return invalidAttestation("executor mismatch");
+    if (attestation.model !== opts.effectiveRoute.model || attestation.reasoningEffort !== opts.effectiveRoute.reasoningEffort) {
+      return invalidAttestation("observed route mismatch");
+    }
+    if (!/^[a-f0-9]{64}$/u.test(opts.routingPolicyFingerprint ?? "")) {
+      return invalidAttestation("invalid policy fingerprint");
+    }
   }
 
   const isError = envelope.exitCode !== 0;

@@ -2,6 +2,7 @@
 // The core: types + the runtime entry. 核心：类型 + 运行时入口。
 export * from "./types.js";
 export { runWorkflow } from "./runtime/run.js";
+export { fingerprintRoutingPolicy, normalizeRoutingPolicy, resolveAgentRoute } from "./runtime/routing.js";
 
 // Bundled executor adapters — ONE adapter per CLI, swap or extend for your model/harness.
 // 内置的 executor 适配器 —— 每个 CLI 一个适配器，可替换或扩展成你的模型/harness。

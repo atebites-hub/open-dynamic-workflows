@@ -28,6 +28,7 @@ import { extractMeta, runScript } from "./sandbox.js";
 import { createHooks } from "./hooks.js";
 import { createSemaphore, createCounter } from "./semaphore.js";
 import { openJournal } from "../journal/journal.js";
+import { fingerprintRoutingPolicy, normalizeRoutingPolicy } from "./routing.js";
 
 const now = (): string => new Date().toISOString();
 
@@ -104,6 +105,20 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
   // (2) Journal 的基准目录：<cwd>/.odw/<slug>/runs（可用 runDir 覆盖）。
   const baseDir = options.runDir ?? path.join(cwd, ".odw", slug, "runs");
 
+  const executors = options.executors;
+  if (!executors || Object.keys(executors).length === 0) {
+    throw new Error("runWorkflow requires a non-empty 'executors' map");
+  }
+  if (options.routingPolicy !== undefined && options.resumeFromRunId !== undefined) {
+    throw new Error("routingPolicy cannot be combined with resumeFromRunId");
+  }
+  const routingPolicy = options.routingPolicy !== undefined
+    ? normalizeRoutingPolicy(options.routingPolicy, executors)
+    : undefined;
+  const routingPolicyFingerprint = routingPolicy
+    ? fingerprintRoutingPolicy(routingPolicy)
+    : undefined;
+
   // (3) Open journal + persist the resolved script.
   // (3) 打开 journal + 持久化已解析的脚本。
   const journal = await openJournal({
@@ -152,15 +167,6 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     options.onEvent?.(e);
   };
 
-  // (7) Executor registry. Required and non-empty. Missing executor still fails
-  // fast unless the host set defaultExecutor (Grok-hosted plugin only).
-  // (7) Executor 注册表。必填且非空。缺 executor 仍 fail fast，除非 host 设置了
-  // defaultExecutor（仅 Grok 托管插件）。
-  const executors = options.executors;
-  if (!executors || Object.keys(executors).length === 0) {
-    throw new Error("runWorkflow requires a non-empty 'executors' map");
-  }
-
   // Run a script body at a given nesting depth under a fresh RunContext that shares the
   // 在给定嵌套深度下、用一个全新的 RunContext 运行脚本体，该 RunContext 共享
   // run-global primitives (semaphore, counter, abort, journal, emit).
@@ -193,6 +199,9 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       ...(options.agentTimeoutMs !== undefined ? { agentTimeoutMs: options.agentTimeoutMs } : {}),
       ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
       ...(options.retryBackoffMs !== undefined ? { retryBackoffMs: options.retryBackoffMs } : {}),
+      ...(routingPolicy !== undefined && routingPolicyFingerprint !== undefined
+        ? { routingPolicy, routingPolicyFingerprint }
+        : {}),
     };
 
     // workflow() — one level of nesting only; shares all run-global primitives.
@@ -229,7 +238,15 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
 
   // TOP LEVEL.
   // 顶层。
-  emit({ type: "run_start", runId: journal.runId, meta, ts: now() });
+  emit({
+    type: "run_start",
+    runId: journal.runId,
+    meta,
+    ts: now(),
+    ...(routingPolicy !== undefined && routingPolicyFingerprint !== undefined
+      ? { routingPolicy, routingPolicyFingerprint }
+      : {}),
+  });
 
   const startedAt = Date.now();
   let ok = true;
@@ -307,5 +324,8 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
     failedWorkflows,
     durable,
     journalErrors,
+    ...(routingPolicy !== undefined && routingPolicyFingerprint !== undefined
+      ? { routingPolicy, routingPolicyFingerprint }
+      : {}),
   };
 }

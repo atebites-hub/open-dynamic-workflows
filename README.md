@@ -74,4 +74,22 @@ npm run smoke        # 全部测试——零 token、不 spawn 真实 model CLI�
 
 欢迎 star、提 issue、发 PR——bug 反馈、新的 executor(比如 Gemini / DeepSeek 适配器)、文档、点子都欢迎。
 
+## 不可变路由策略
+
+`runWorkflow()` 可以把一条路由绑定到本次 run 的全部模型节点：
+
+```ts
+const result = await runWorkflow({
+  scriptPath: './workflow.js',
+  executors: { zcode: zcodeExecutor },
+  routingPolicy: { executor: 'zcode', model: 'zai/glm-5.3', reasoningEffort: 'high' },
+});
+```
+
+策略会在 journal 打开前完成规范化、冻结和指纹计算。节点省略的字段继承策略；显式冲突的
+executor、model 或 effort 会在缓存查询和启动 executor 前失败。嵌套 workflow 继承同一策略；
+首版禁止策略与 `resumeFromRunId` 同时使用。`run_start`、`WorkflowResult` 和 subprocess trace
+会携带固定键顺序的 SHA-256 指纹，以及可用时的有效路由和运行时 ID。这是关联证据，不是
+host attestation；没有策略的 run 保持原有行为和 trace 形状。
+
 License: MIT.

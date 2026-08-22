@@ -77,4 +77,24 @@ npm run smoke        # all tests — zero tokens, no real model CLI (claude/code
 
 Issues, PRs, and ⭐ stars are all welcome — bug reports, new executors (e.g. a Gemini or DeepSeek adapter), docs, or ideas.
 
+## Immutable routing policy
+
+`runWorkflow()` can bind one route to every model node:
+
+```ts
+const result = await runWorkflow({
+  scriptPath: "./workflow.js",
+  executors: { zcode: zcodeExecutor },
+  routingPolicy: { executor: "zcode", model: "zai/glm-5.3", reasoningEffort: "high" },
+});
+```
+
+The policy is normalized, frozen, and fingerprinted once before the run journal opens. Omitted
+node fields inherit it; explicit conflicting executor, model, or effort values fail before cache
+lookup or executor launch. Nested workflows inherit the same policy. A policy cannot be combined
+with `resumeFromRunId` in this first release. `run_start`, `WorkflowResult`, and subprocess traces
+carry the fixed-key SHA-256 fingerprint plus the effective route and observed runtime ID when
+available. This is correlation evidence, not host attestation; unpolicy runs retain their existing
+behavior and trace shape.
+
 License: MIT.
