@@ -13,8 +13,9 @@ reimplementation of the same model (fan a deterministic script out across many s
 without those limits:
 
 - **Any model.** Every `agent()` chooses its `Executor` by name. Bundled adapters drive
-  `claude --print`, `codex exec`, and `zcode --prompt` — different nodes can run on different
-  CLIs — and you can plug in any other model, API, or backend. No lock-in.
+  Cursor CLI (`agent` / `cursor-agent`), `grok -p`, `claude --print`, `codex exec`, and
+  `zcode --prompt` — different nodes can run on different CLIs — and you can plug in any
+  other model, API, or backend. No lock-in.
 - **Shipped as a skill + a CLI.** Not a feature buried in one product. The skill teaches an
   agent to *write* workflows; the CLI *runs* them. Plain, portable open source.
 - **Drops into any coding agent.** Since it's just a skill + a CLI, wire it into whatever you
@@ -31,15 +32,38 @@ npx skills add imsai-sh/open-dynamic-workflows
 
 You can also invoke `/open-dynamic-workflows` explicitly to have the agent only *write* the workflow script without running it — handy for human review, or for re-running the generated `workflow.js` from your own automation.
 
+Cursor CLI (`agent` from [cursor.com/install](https://cursor.com/install), historically also `cursor-agent`) is a first-class executor. Once it is installed, no extra wrapper is required:
+
+```js
+export const meta = {
+  name: "cursor-review",
+  description: "Review the working tree with Cursor CLI",
+};
+
+const notes = await agent("Summarize the git diff in 5 bullets. Do not edit files.", {
+  executor: "cursor",
+  label: "diff",
+});
+return notes;
+```
+
+Resolution order: `CURSOR_BIN`, then `cursor-agent` on PATH / `~/.local/bin`, then an `agent` binary fingerprinted as Cursor. Grok Build's `agent` (typically `~/.grok/bin/agent`) is never selected.
+
 ## Module map
 
 ```
 src/
 ├── types.ts              ← frozen shared contract — every module codes against it
-├── index.ts              ← public API: runWorkflow + claudeExecutor / codexExecutor / zcodeExecutor + builtinExecutors + types
+├── index.ts              ← public API: runWorkflow + cursor/grok/claude/codex/zcode adapters + builtinExecutors + types
 ├── cli.ts                ← CLI entry: argv → runWorkflow → live tree
 ├── executor/             ← one subfolder per CLI; subprocess.ts is the shared, CLI-agnostic driver
 │   ├── subprocess.ts     ← spawn · process-group kill · wall/idle/abort watchdogs · line buffering · ExecTrace
+│   ├── cursor/
+│   │   ├── cursor.ts     ← spawn Cursor CLI (`cursor-agent` / `agent`) — the only place that touches Cursor
+│   │   └── cursor-json.ts ← Cursor `--output-format json|stream-json` reducer (pure)
+│   ├── grok/
+│   │   ├── grok.ts       ← spawn `grok -p` — the only place that touches grok
+│   │   └── grok-json.ts  ← grok json / streaming-json reducer (pure)
 │   ├── claude/
 │   │   ├── claude.ts     ← spawn `claude --print` — the only place that touches claude
 │   │   └── stream-json.ts ← claude stream-json event reducer (pure)
@@ -65,7 +89,7 @@ src/
 npm install
 npm run build        # tsc → dist/
 npm run typecheck    # tsc --noEmit (strict)
-npm run smoke        # all tests — zero tokens, no real model CLI (claude/codex/zcode)
+npm run smoke        # all tests — zero tokens, no real model CLI (cursor/grok/claude/codex/zcode)
 ```
 
 ## Sibling projects

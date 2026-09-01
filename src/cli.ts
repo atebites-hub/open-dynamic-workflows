@@ -16,7 +16,7 @@ const USAGE =
   "usage: odw run <scriptPath> [--name <name>] [--args <json>] " +
   "[--resume <runId>] [--cwd <dir>] [--model <id>] " +
   "[--run-dir <dir>] [--no-tree]\n" +
-  "\nScripts must pick a CLI per node: every agent() needs {executor:'grok'|'claude'|'codex'|'zcode'} unless the host supplies a default.\n";
+  "\nScripts must pick a CLI per node: every agent() needs {executor:'cursor'|'grok'|'claude'|'codex'|'zcode'} unless the host supplies a default.\n";
 
 // Flags that take a following value; everything else is boolean or positional.
 // 需要紧跟一个取值的 flag；其余都按布尔 flag 或位置参数处理。
