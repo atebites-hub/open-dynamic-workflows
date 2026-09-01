@@ -58,7 +58,7 @@ export const meta = {
 - **`agent(prompt, opts?) → Promise<any>`** —— 启动一个 subagent。不带 `schema` 时解析为它的最终文本;
   带 `schema`(一个 JSON Schema)时,subagent 被强制产出符合的对象,`agent()` 解析为**校验后的对象**。
   被跳过 / 中止则返回 `null`(用 `.filter(Boolean)` 过滤)。`opts`:`executor`（除非 run 有 routing policy，否则必填——按名字
-  从 host 提供的注册表里挑出运行本 node 的 agent CLI,如 `'claude'`、`'codex'` 或 `'zcode'`;未知名会让整个 run 失败)、
+  从 host 提供的注册表里挑出运行本 node 的 agent CLI,如 `'cursor'`、`'grok'`、`'claude'`、`'codex'` 或 `'zcode'`;未知名会让整个 run 失败)、
   `label`(简短显示名)、`phase`(指定进度分组——**在 parallel/pipeline 的 stage 里务必显式传**)、
   `schema`、`model`(覆盖;省略则继承)、`reasoningEffort`(Codex 覆盖;覆盖 model 时默认 `medium`)、
   `isolation:'worktree'`(给该 agent 开独立 git worktree——
@@ -88,13 +88,28 @@ subagent 的**最终文本就是它的返回值**——给脚本用的原始数�
 来 review,当你希望验证者和作者是不同模型时:
 
 ```js
-// 每个 agent() 各自指定 CLI。'claude'、'codex' 与 'zcode' 都来自 host 的注册表。
+// 每个 agent() 各自指定 CLI。'cursor'、'claude'、'codex' 与 'zcode' 都来自 host 的注册表。
 const draft = await agent('Draft a fix for this failing test.', { executor: 'claude', label: 'draft' })
 const review = await agent(`Independently review this fix — is it correct?\n\n${draft}`, {
   executor: 'codex', label: 'review', schema: VERDICT_SCHEMA,
 })
 const notes = await agent(`用一句话总结这个修复: ${draft}`, { executor: 'zcode', label: 'notes' })
 return { draft, review, notes }
+```
+
+Cursor CLI 同样是 per-node 选择——装好 [cursor.com/install](https://cursor.com/install) 的 `agent`（历史上也叫 `cursor-agent`）即可，不必再包一层：
+
+```js
+export const meta = {
+  name: 'cursor-review',
+  description: '用 Cursor CLI 审阅工作区',
+}
+
+const notes = await agent('用 5 条要点总结 git diff。不要改文件。', {
+  executor: 'cursor',
+  label: 'diff',
+})
+return notes
 ```
 
 ### 3. 运行时强制的规则(不合格立即报错)

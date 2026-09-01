@@ -119,3 +119,19 @@ test("combined reducer auto-detects json vs stream-json fixtures", () => {
   );
   assert.equal(streamOut.text, "STREAM_OK");
 });
+
+test("json reducer: non-zero exitCode marks error even when is_error is false", () => {
+  const outcome = reduceCursorJson(eventsFromLines([jsonResult({ result: "partial" })]), {
+    exitCode: 2,
+  });
+  assert.equal(outcome.isError, true);
+  assert.equal(outcome.text, "partial");
+  assert.equal(outcome.resultSubtype, "error_during_execution");
+});
+
+test("stream-json reducer: missing terminal result is an execution error", () => {
+  const outcome = reduceCursorStreamJson(eventsFromLines([streamInit(), streamAssistant("working")]));
+  assert.equal(outcome.isError, true);
+  assert.equal(outcome.sessionId, SESSION);
+  assert.equal(outcome.text, "");
+});

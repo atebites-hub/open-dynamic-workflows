@@ -67,12 +67,14 @@ These are injected into the script scope:
   agent is skipped/aborted (filter with `.filter(Boolean)`). `opts`: `executor` (required unless
   the enclosing run has a routing policy —
   picks which agent CLI runs this node, by name, from the registry the host provides, e.g.
-  `'grok'`, `'claude'`, `'codex'`, or `'zcode'`; an unknown name fails the run), `label` (short display label),
+  `'cursor'`, `'grok'`, `'claude'`, `'codex'`, or `'zcode'`; an unknown name fails the run), `label` (short display label),
   `phase` (assign to a progress group — **use this inside parallel/pipeline stages**),
   `schema`, `model` (override; omit to inherit), `reasoningEffort` (Codex override; a model
   override defaults to `medium`), `isolation:'worktree'` (fresh git worktree —
   EXPENSIVE, only when agents mutate files in parallel), `agentType` (named subagent preset).
-  Prefer **grok** first. Hosts may set a default executor (Grok Build does); otherwise every
+  Prefer **grok** first when that CLI is available. Cursor CLI (`executor: 'cursor'`) is
+  first-class: install with `curl https://cursor.com/install -fsS | bash` (binary `agent`,
+  also historically `cursor-agent`). Hosts may set a default executor (Grok Build does); otherwise every
   node must name its executor (see the per-node example below).
 
   A host may instead provide `runWorkflow({ routingPolicy: { executor, model, reasoningEffort } })`.
@@ -111,11 +113,26 @@ const notes = await agent(`Summarize the fix in one line: ${draft}`, { executor:
 return { draft, review, notes }
 ```
 
+Cursor CLI is the same per-node switch — no IDE wrapper:
+
+```js
+export const meta = {
+  name: 'cursor-review',
+  description: 'Review the working tree with Cursor CLI',
+}
+
+const notes = await agent('Summarize the git diff in 5 bullets. Do not edit files.', {
+  executor: 'cursor',
+  label: 'diff',
+})
+return notes
+```
+
 ### 3. Rules that the runtime enforces (fail fast)
 
 - **Plain JS only**: no `import`, `require`, `fs`, or Node APIs in the script.
 - **Every `agent()` needs an `executor` unless the host set a default**: Grok Build defaults
-  to `grok`. Standalone / Codex / ZCode have no default. An unknown name fails the run.
+  to `grok`. Standalone / Codex / ZCode / Cursor have no default. An unknown name fails the run.
 - **Determinism**: `Date.now()`, `Math.random()`, and argless `new Date()` are unavailable
   (they would break resume). Pass timestamps via `args`; vary by index instead of random.
 - **Structured output**: `opts.schema` is a JSON Schema whose **root must be `type:"object"`**

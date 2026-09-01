@@ -9,7 +9,7 @@ export { fingerprintRoutingPolicy, normalizeRoutingPolicy, resolveAgentRoute } f
 export { claudeExecutor, buildClaudeArgs } from "./executor/claude/claude.js";
 export { codexExecutor, buildCodexArgs } from "./executor/codex/codex.js";
 export { grokExecutor, buildGrokArgs } from "./executor/grok/grok.js";
-export { cursorExecutor, buildCursorArgs, resolveCursorBin } from "./executor/cursor/cursor.js";
+export { cursorExecutor, buildCursorArgs, resolveCursorBin, isCursorCliBinary } from "./executor/cursor/cursor.js";
 export { zcodeExecutor, buildZcodeArgs } from "./executor/zcode/zcode.js";
 
 // Pure reducers + the shared subprocess driver — exposed so hosts can build their own adapters.
