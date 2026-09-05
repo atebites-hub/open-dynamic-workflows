@@ -1,0 +1,139 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Weekday check (GitHub Actions cron is UTC). Staggered off zcode-cli's 17 13.
+    - cron: "23 13 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: open-dynamic-workflows-sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'atebites-hub/open-dynamic-workflows'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+
+      - name: "Open chore: sync upstream PR when parent moves"
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+          UPSTREAM_URL: https://github.com/imsai-sh/open-dynamic-workflows.git
+        run: |
+          set -euo pipefail
+
+          existing="$(gh pr list --base main --state open --json title,url \
+            --jq '.[] | select(.title == "chore: sync upstream") | .url' | head -n 1 || true)"
+          if [[ -n "${existing}" ]]; then
+            echo "Open sync PR already exists: ${existing}"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "${UPSTREAM_URL}"
+          git fetch --no-tags origin main
+          git fetch --no-tags upstream main
+
+          ours="$(git rev-parse origin/main)"
+          export UPSTREAM_SHA
+          UPSTREAM_SHA="$(git rev-parse upstream/main)"
+          export UPSTREAM_SHORT
+          UPSTREAM_SHORT="$(git rev-parse --short upstream/main)"
+          export UPSTREAM_SUBJECT
+          UPSTREAM_SUBJECT="$(git log -1 --format=%s upstream/main)"
+          echo "origin/main=${ours}"
+          echo "upstream/main=${UPSTREAM_SHA}"
+
+          if git merge-base --is-ancestor "${UPSTREAM_SHA}" origin/main; then
+            echo "origin/main already contains upstream/main; nothing to sync"
+            exit 0
+          fi
+
+          branch="chore/sync-upstream-${UPSTREAM_SHORT}"
+          git checkout -B "${branch}" origin/main
+
+          conflicts="false"
+          conflicted=""
+          if git merge-base --is-ancestor origin/main "${UPSTREAM_SHA}"; then
+            git merge --ff-only upstream/main
+          else
+            if git merge --no-ff upstream/main -m "chore: merge upstream ${UPSTREAM_SHORT}"; then
+              :
+            else
+              conflicts="true"
+              conflicted="$(git diff --name-only --diff-filter=U)"
+              echo "Merge conflicts:"
+              echo "${conflicted}"
+              git add -u
+              git commit --no-verify -m "chore: merge upstream ${UPSTREAM_SHORT} (unresolved conflicts)"
+            fi
+          fi
+
+          if [[ "${conflicts}" != "true" && -f UPSTREAM.md ]]; then
+            python3 -c '
+          import os, pathlib, re
+          sha = os.environ["UPSTREAM_SHA"]
+          short = os.environ["UPSTREAM_SHORT"]
+          subject = os.environ["UPSTREAM_SUBJECT"]
+          path = pathlib.Path("UPSTREAM.md")
+          text = path.read_text()
+          replacement = f"`{sha}` (`{short}`, `{subject}`)"
+          next_text, n = re.subn(
+              r"<!-- upstream-tip-begin -->.*?<!-- upstream-tip-end -->",
+              f"<!-- upstream-tip-begin -->{replacement}<!-- upstream-tip-end -->",
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit("UPSTREAM.md last-synced markers missing or duplicated")
+          path.write_text(next_text)
+          '
+            git add UPSTREAM.md
+            if ! git diff --cached --quiet; then
+              git commit --no-verify -m "docs: record synced upstream tip ${UPSTREAM_SHORT}"
+            fi
+          fi
+
+          git push -u origin "HEAD:${branch}"
+
+          docs_url="https://github.com/${GITHUB_REPOSITORY}/blob/${branch}/UPSTREAM.md"
+          if [[ "${conflicts}" == "true" ]]; then
+            conflict_md="$(printf '%s\n' "${conflicted}" | sed '/^$/d' | sed 's/^/- `/; s/$/`/')"
+            body="$(printf '%s\n' \
+              "Automated weekday sync from https://github.com/imsai-sh/open-dynamic-workflows." \
+              "" \
+              "**Upstream tip:** \`${UPSTREAM_SHA}\` — ${UPSTREAM_SUBJECT}" \
+              "" \
+              "**Conflicts:** this branch contains unresolved conflict markers. Resolve using [UPSTREAM.md](${docs_url}). Keep factory commits listed there." \
+              "" \
+              "${conflict_md}" \
+              "" \
+              "Merge with a **merge commit** (do not squash or rebase) so factory commits on \`main\` stay intact." \
+            )"
+          else
+            body="$(printf '%s\n' \
+              "Automated weekday sync from https://github.com/imsai-sh/open-dynamic-workflows." \
+              "" \
+              "**Upstream tip:** \`${UPSTREAM_SHA}\` — ${UPSTREAM_SUBJECT}" \
+              "" \
+              "Merge with a **merge commit** (do not squash or rebase) so factory commits on \`main\` stay intact. See [UPSTREAM.md](${docs_url})." \
+            )"
+          fi
+
+          gh pr create --base main --head "${branch}" --title "chore: sync upstream" --body "${body}"

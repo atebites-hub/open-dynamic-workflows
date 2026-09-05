@@ -97,6 +97,8 @@ npm run smoke        # 全部测试——零 token、不 spawn 真实 model CLI�
 
 欢迎 star、提 issue、发 PR——bug 反馈、新的 executor(比如 Gemini / DeepSeek 适配器)、文档、点子都欢迎。
 
+本仓库是 [imsai-sh/open-dynamic-workflows](https://github.com/imsai-sh/open-dynamic-workflows) 的 GitHub fork。上游同步与 factory 提交清单见 [UPSTREAM.md](./UPSTREAM.md)。
+
 ## 不可变路由策略
 
 `runWorkflow()` 可以把一条路由绑定到本次 run 的全部模型节点：

@@ -101,6 +101,8 @@ npm run smoke        # all tests — zero tokens, no real model CLI (cursor/grok
 
 Issues, PRs, and ⭐ stars are all welcome — bug reports, new executors (e.g. a Gemini or DeepSeek adapter), docs, or ideas.
 
+This repository is a GitHub fork of [imsai-sh/open-dynamic-workflows](https://github.com/imsai-sh/open-dynamic-workflows). See [UPSTREAM.md](./UPSTREAM.md) for remotes, sync policy, and factory-only commits.
+
 ## Immutable routing policy
 
 `runWorkflow()` can bind one route to every model node:
