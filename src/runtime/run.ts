@@ -135,6 +135,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
   // (5) 本次运行共享的原语。
   const sem = createSemaphore(concurrency);
   const counter = createCounter(TOTAL_AGENT_CAP);
+  const worktreeBase: { commit?: string } = {};
   // Run-level output-token tally — pure observability (reported as tokensSpent), no ceiling.
   // run 级输出 token 计数 —— 纯观测（作为 tokensSpent 上报），不设上限。
   let tokensSpent = 0;
@@ -192,6 +193,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
         tokensSpent += n;
       },
       registryDir,
+      ...(options.isolation !== undefined ? { isolation: options.isolation } : {}),
       ...(options.model !== undefined ? { defaultModel: options.model } : {}),
       ...(options.defaultExecutor !== undefined
         ? { defaultExecutor: options.defaultExecutor }
@@ -232,7 +234,7 @@ export async function runWorkflow(options: RunOptions): Promise<WorkflowResult> 
       }
     };
 
-    const hooks = createHooks(ctx, { semaphore: sem, runNested, args: scriptArgs });
+    const hooks = createHooks(ctx, { semaphore: sem, runNested, args: scriptArgs, worktreeBase });
     return await runScript(src, hooks);
   };
 

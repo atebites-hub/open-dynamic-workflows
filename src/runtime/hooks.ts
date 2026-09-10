@@ -9,6 +9,7 @@
 // 这里通过 ctx + deps 闭包捕获；workflow 脚本只看到 ScriptHooks 的形状。
 
 import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type {
@@ -36,6 +37,7 @@ export interface HookDeps {
   semaphore: Semaphore;
   runNested: (ref: WorkflowRef, args: unknown) => Promise<unknown>;
   args: unknown;
+  worktreeBase: { commit?: string };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -76,36 +78,67 @@ function oneLine(s: string, max = 300): string {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-// Create a temporary detached worktree for isolation:"worktree".
-// 为 isolation:"worktree" 创建临时 detached worktree。
+// Create a named, recoverable worktree for isolation:"worktree".
 // Isolation is fail-closed: falling back to ctx.cwd would let parallel agents
 // mutate the caller's checkout, which is more dangerous than failing the agent.
 // 隔离失败时 fail-closed：回退到 ctx.cwd 会让并行 agent 修改调用者 checkout，
 // 这比让 agent 失败更危险。
-function createWorktree(repoCwd: string, runDir: string, agentId: number): string {
-  const wtDir = path.join(runDir, "worktrees", `agent-${agentId}`);
-  execFileSync("git", ["worktree", "add", "--detach", wtDir], {
+function createWorktree(repoCwd: string, runId: string, agentId: number, baseCommit: string) {
+  const prefix = execFileSync("git", ["rev-parse", "--show-prefix"], {
+    cwd: repoCwd,
+    encoding: "utf8",
+  }).trim();
+  const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: repoCwd, encoding: "utf8",
+  }).trim();
+  const wtDir = path.join(repoRoot, ".odw", "worktrees", `${runId}-agent-${agentId}`);
+  const branch = `odw/${runId}/agent-${agentId}`;
+  execFileSync("git", ["worktree", "add", "-b", branch, wtDir, baseCommit], {
     cwd: repoCwd,
     stdio: "ignore",
   });
-  return wtDir;
+  return { root: wtDir, cwd: path.join(wtDir, prefix), branch };
 }
 
-// Remove the worktree iff it has no uncommitted changes (`git status --porcelain` empty).
-// 仅当 worktree 没有未提交改动时才移除它（`git status --porcelain` 输出为空）。
-function cleanupWorktree(repoCwd: string, wtDir: string): void {
+function recordWorktree(ctx: RunContext, id: number, root: string, base: string): void {
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  const artifacts = path.join(ctx.runDir, "agents");
+  mkdirSync(artifacts, { recursive: true });
+  const diff = path.join(artifacts, `agent-${id}.diff`);
+  // ponytail: tracked changes form the patch; untracked/ignored files are listed
+  // in status and kept in the retained worktree rather than copied into journals.
+  writeFileSync(diff, git("diff", "--binary", base, "--"));
+  const receipt = {
+    root, base, branch: git("branch", "--show-current").trim(),
+    head: git("rev-parse", "HEAD").trim(), diff,
+    status: git("status", "--porcelain", "--untracked-files=all", "--ignored"),
+  };
+  const metadata = path.join(artifacts, `agent-${id}.worktree.json`);
+  writeFileSync(metadata, JSON.stringify(receipt, null, 2) + "\n");
+  ctx.emit({ type: "log", message: `[worktree] agent ${id}: receipt=${metadata}; branch=${receipt.branch}; diff=${diff}`, phase: ctx.currentPhase.value, ts: nowIso() });
+}
+
+// Only remove a successful, pristine checkout at its original commit. Committed,
+// dirty, ignored, failed, or uncertain work stays rooted for inspection/recovery.
+function cleanupWorktree(repoCwd: string, wtDir: string, baseCommit: string): string {
   try {
-    const status = execFileSync("git", ["status", "--porcelain"], {
+    const head = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: wtDir,
+      encoding: "utf8",
+    }).trim();
+    if (head !== baseCommit) return `retained ${wtDir}: worker HEAD ${head} differs from base ${baseCommit}`;
+    const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all", "--ignored"], {
       cwd: wtDir,
       encoding: "utf8",
     });
-    if (status.trim() !== "") return; // dirty → keep for inspection ｜ 有改动 → 保留以便检查
-    execFileSync("git", ["worktree", "remove", "--force", wtDir], {
+    if (status.trim() !== "") return `retained ${wtDir}: changed, untracked, or ignored files`;
+    execFileSync("git", ["worktree", "remove", wtDir], {
       cwd: repoCwd,
       stdio: "ignore",
     });
+    return `removed pristine worktree ${wtDir}`;
   } catch (err) {
-    console.warn(`[hooks] worktree cleanup failed for ${wtDir}: ${String(err)}`);
+    return `retained ${wtDir}: cleanup could not prove safe removal (${String(err)})`;
   }
 }
 
@@ -116,6 +149,7 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
     // routing policy 或 defaultExecutor 可提供可选 executor；两者都没有时，仍走原有的
     // fail-fast 缺 executor 路径（不变量 #10）。
     const o: Partial<AgentOptions> = { ...(opts ?? {}) };
+    if (ctx.isolation === "worktree") o.isolation = "worktree";
     Object.assign(o, resolveAgentRoute(ctx.routingPolicy, {
       ...(o.executor !== undefined ? { executor: o.executor } : {}),
       ...(o.model !== undefined ? { model: o.model } : {}),
@@ -137,7 +171,7 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
 
     // RESUME: a cached record for this content key → return instantly, no spend.
     // RESUME：该内容 key 已有缓存记录 → 立即返回，不产生花费。
-    const cached = ctx.takeCached(key);
+    const cached = o.isolation === "worktree" ? undefined : ctx.takeCached(key);
     if (cached !== undefined) {
       ctx.emit({ type: "agent_start", agentId: id, label, phase, cached: true, ts: nowIso() });
       ctx.emit({
@@ -163,11 +197,20 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
     ctx.emit({ type: "agent_start", agentId: id, label, phase, cached: false, ts: nowIso() });
 
     let worktreeDir: string | null = null;
+    let worktreeCommit = "";
+    let completed = false;
     try {
       let cwd = ctx.cwd;
       if (o.isolation === "worktree") {
-        worktreeDir = createWorktree(ctx.cwd, ctx.runDir, id);
-        cwd = worktreeDir;
+        deps.worktreeBase.commit ??= execFileSync("git", ["rev-parse", "HEAD"], {
+          cwd: ctx.cwd,
+          encoding: "utf8",
+        }).trim();
+        worktreeCommit = deps.worktreeBase.commit;
+        const worktree = createWorktree(ctx.cwd, ctx.runId, id, worktreeCommit);
+        worktreeDir = worktree.root;
+        cwd = worktree.cwd;
+        ctx.emit({ type: "log", message: `[worktree] agent ${id}: created ${worktreeDir}; branch=${worktree.branch}; base=${worktreeCommit}; cwd=${cwd}`, phase, ts: nowIso() });
       }
 
       const resolvedModel = o.model ?? ctx.defaultModel;
@@ -281,6 +324,7 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
         outputTokens: res.usage.outputTokens,
         ts: nowIso(),
       });
+      completed = true;
       return value;
     } catch (e) {
       const aborted = ctx.abort.aborted;
@@ -301,7 +345,21 @@ export function createHooks(ctx: RunContext, deps: HookDeps): ScriptHooks {
       throw e;
     } finally {
       deps.semaphore.release();
-      if (worktreeDir !== null) cleanupWorktree(ctx.cwd, worktreeDir);
+      if (worktreeDir !== null) {
+        try {
+          recordWorktree(ctx, id, worktreeDir, worktreeCommit);
+        } catch (error) {
+          ctx.emit({ type: "log", message: `[worktree] retained ${worktreeDir}: evidence capture failed (${String(error)})`, phase, ts: nowIso() });
+          if (completed) {
+            ctx.noteAgentFailure();
+            throw error;
+          }
+        }
+        const disposition = completed && !ctx.abort.aborted
+          ? cleanupWorktree(ctx.cwd, worktreeDir, worktreeCommit)
+          : `retained ${worktreeDir}: agent failed or was cancelled`;
+        ctx.emit({ type: "log", message: `[worktree] agent ${id}: ${disposition}`, phase, ts: nowIso() });
+      }
     }
   };
 

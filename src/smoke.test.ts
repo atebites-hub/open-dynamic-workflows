@@ -230,7 +230,7 @@ return value;
 `;
   await runWorkflow({ ...opts("worktree", script), runDir, executors: { fake: executor } });
   assert.notEqual(executorCwd, process.cwd());
-  assert.match(executorCwd, /worktrees[\\/]agent-1$/);
+  assert.match(executorCwd, /worktrees[\\/].+-agent-1$/);
 
   const listed = execFileSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8" });
   assert.doesNotMatch(listed, new RegExp(executorCwd.replace(/[.*+?^${}()|[\]\\\\]/g, "\\\\$&")));
