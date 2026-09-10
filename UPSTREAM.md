@@ -36,8 +36,12 @@ Do not `git push` to `upstream`.
 - **Last synced upstream tip:** <!-- upstream-tip-begin -->`f6a6be3b50134d66dda281910643d92c4c6d8caa` (`f6a6be3`, `docs: make Chinese the default README`)<!-- upstream-tip-end -->
 
 That SHA is the current merge-base of `origin/main` and `upstream/main` (they
-match: this fork is **ahead**, not behind). The weekday sync workflow rewrites
-only the `upstream-tip-begin/end` span when it opens a clean sync PR.
+match: this fork is **ahead**, not behind). Reconfirmed 2026-09-10: GitHub
+compare `imsai-sh:main...atebites-hub:main` is **ahead 29 / behind 0**; weekday
+Sync upstream run [`34505742574`](https://github.com/atebites-hub/open-dynamic-workflows/actions/runs/34505742574)
+logged `origin/main already contains upstream/main; nothing to sync`. The weekday
+sync workflow rewrites only the `upstream-tip-begin/end` span when it opens a
+clean sync PR.
 
 ## Owners
 
@@ -49,8 +53,8 @@ only the `upstream-tip-begin/end` span when it opens a clean sync PR.
 These are atebites-only on `origin/main` and not in
 `imsai-sh/open-dynamic-workflows`. Inventory via
 `gh api repos/atebites-hub/open-dynamic-workflows/compare/imsai-sh:main...atebites-hub:main`
-(2026-09-05: **ahead 23 / behind 0**). Do not drop them in an upstream merge
-without recording the deferral here.
+(2026-09-10: **ahead 29 / behind 0**; was 23 / 0 on 2026-09-05). Do not drop
+them in an upstream merge without recording the deferral here.
 
 | Behavior | Why we keep it | Commits |
 | --- | --- | --- |
@@ -65,10 +69,16 @@ without recording the deferral here.
 | cursor-agent executor | First-class Cursor CLI next to grok/claude/codex/zcode | `037a6cc` (PR #5) |
 | Cursor unattended executor | `--trust` / `--approve-mcps`, no `--plugin-dir`, fingerprint Cursor's `agent` | `3181365` (PR #8) |
 | Immutable `routingPolicy` | Bind one route to every model node; tests close acceptance gaps | `bb265f2`, `6230c13` (PR #7) |
+| Fork-maintenance docs + weekday sync | `UPSTREAM.md` + `.github/workflows/sync-upstream.yml`; keep the GitHub fork relationship | `ac6d690` (PR #9) |
+| Weekly Actions artifact cleanup | Delete artifacts older than 3 days (`cleanup-artifacts.yml`) | `b39289c` (PR #10) |
+| fast-uri lockfile pin | Transitive `package-lock.json` pin to patched `3.1.7` (not a marketplace / plugin pin) | `294913b` (PR #11) |
 
 Non-merge factory commits (newest first):
 
 ```
+294913b fix(deps): update fast-uri to patched 3.1.7
+b39289c ci: add weekly Actions artifact cleanup
+ac6d690 docs: add fork-maintenance UPSTREAM.md and weekday sync workflow
 3181365 feat(cursor): make Cursor CLI a reliable unattended executor
 6230c13 test: close ODW routing acceptance gaps
 bb265f2 feat: enforce immutable workflow routing policy
