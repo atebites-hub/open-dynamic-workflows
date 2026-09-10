@@ -17,6 +17,32 @@ out to a subagent. The control flow (loops, branching, fan-out) lives in determi
 JS — the LLM work happens only at the leaves. Intermediate results stay in script
 variables, so only the final answer comes back.
 
+## Harness policy (2026-09-09)
+
+Claude harnesses use native **ultracode**; Codex/ChatGPT harnesses use native
+**ultra** mode. Recommend that mode without changing the chosen model. Do not
+activate or call ODW from either host. This supersedes older alignment advice.
+
+ODW is used by Cursor, Grok Build, ZCode, Antigravity and Copilot. Other harnesses
+are integration gaps until an adapter and live evidence exist, not additional
+policy exclusions. Legacy explicit Claude/Codex worker adapters remain available
+to standalone SDK callers; they do not enable ODW in those host applications.
+
+## Worktree safety
+
+Use `isolation: 'worktree'` for workers that mutate files concurrently, not for
+every read-only task. The first isolated worker pins the caller HEAD for the whole
+run, including nested workflows. Staged/unstaged caller edits are not copied or
+discarded; commit required shared inputs before an isolated run. A caller inside
+a repository subdirectory stays in that subdirectory inside each worker checkout.
+
+Only successful pristine worktrees at their original commit are removed, without
+force. New commits, changed/untracked/ignored files, failed or cancelled workers,
+and uncertain cleanup retain the checkout. Use `worktreeNotes` and the agent
+trace `cwd` to inspect and integrate the result; no changes are auto-merged into
+the caller. Retained commits remain reachable through their worktree. Worktrees
+are Git isolation, not a security sandbox: native permission checks remain in force.
+
 ## When to use a workflow (vs subagents / skills / plain tools)
 
 A workflow **moves the plan into code**. Reach for one when:
@@ -107,7 +133,7 @@ different one review, when you want the verifier to be a different model from th
 // Prefer zcode. Name another CLI when you want a different worker.
 const draft = await agent('Draft a fix for this failing test.', { executor: 'zcode', label: 'draft' })
 const review = await agent(`Independently review this fix — is it correct?\n\n${draft}`, {
-  executor: 'codex', label: 'review', schema: VERDICT_SCHEMA,
+  executor: 'cursor', label: 'review', schema: VERDICT_SCHEMA,
 })
 const notes = await agent(`Summarize the fix in one line: ${draft}`, { executor: 'zcode', label: 'notes' })
 return { draft, review, notes }
@@ -202,12 +228,12 @@ const DIMENSIONS = [
 
 const results = await pipeline(
   DIMENSIONS,
-  (d) => agent(d.prompt, { executor: 'claude', label: `review:${d.key}`, phase: 'Review', schema: FINDINGS_SCHEMA }),
+  (d) => agent(d.prompt, { executor: 'grok', label: `review:${d.key}`, phase: 'Review', schema: FINDINGS_SCHEMA }),
   (review) =>
     parallel(
       review.findings.map((f) => () =>
         agent(`Adversarially verify this finding — is it real? ${f.title}`, {
-          executor: 'claude', label: `verify:${f.file}`, phase: 'Verify', schema: VERDICT_SCHEMA,
+          executor: 'grok', label: `verify:${f.file}`, phase: 'Verify', schema: VERDICT_SCHEMA,
         }).then((v) => ({ ...f, verdict: v })),
       ),
     ),

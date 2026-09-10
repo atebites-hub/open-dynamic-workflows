@@ -202,6 +202,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           if (unsetEnv) {
             for (const key of unsetEnv) delete childEnv[key];
           }
+          childEnv.ODW_LEAF = "1";
           const child = spawn(spec.command, args, {
             cwd: opts.cwd,
             env: childEnv,

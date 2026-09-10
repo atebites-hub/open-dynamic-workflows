@@ -270,6 +270,8 @@ export interface RunOptions {
   args?: unknown;
   resumeFromRunId?: string;
   cwd?: string;
+  /** Isolate every agent, including nested calls; isolated writers are never replayed from cache. */
+  isolation?: "worktree";
   model?: string;
   runDir?: string;
   concurrency?: number;
@@ -329,7 +331,7 @@ export interface WorkflowResult {
   tokensSpent: number;
   agentCount: number;
   durationMs: number;
-  /** True only when the run completed without failed agent or workflow events. */
+  /** Script completion and journal durability; inspect failure counts for node acceptance. */
   ok: boolean;
   /** Number of failed agent_end events, including failures swallowed by parallel(). */
   failedAgents: number;
@@ -353,6 +355,7 @@ export interface RunContext {
   runDir: string;
   cwd: string;
   defaultModel?: string;
+  isolation?: "worktree";
   registryDir?: string;
   /** Named executor registry; agent() resolves AgentOptions.executor against this map. */
   /** 命名 executor 注册表；agent() 用 AgentOptions.executor 对照此 map 解析。 */

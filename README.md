@@ -4,6 +4,32 @@
 >
 > English: see [README.en.md](./README.en.md)。
 
+## Harness policy (2026-09-09)
+
+Claude harnesses use native **ultracode**; Codex/ChatGPT harnesses use native
+**ultra** mode. Recommend that mode without changing the chosen model. Do not
+activate or call ODW from either host. This supersedes older alignment advice.
+
+ODW is used by Cursor, Grok Build, ZCode, Antigravity and Copilot. Other harnesses
+are integration gaps until an adapter and live evidence exist, not additional
+policy exclusions. Legacy explicit Claude/Codex worker adapters remain available
+to standalone SDK callers; they do not enable ODW in those host applications.
+
+## Worktree safety
+
+Use `isolation: 'worktree'` for workers that mutate files concurrently, not for
+every read-only task. The first isolated worker pins the caller HEAD for the whole
+run, including nested workflows. Staged/unstaged caller edits are not copied or
+discarded; commit required shared inputs before an isolated run. A caller inside
+a repository subdirectory stays in that subdirectory inside each worker checkout.
+
+Only successful pristine worktrees at their original commit are removed, without
+force. New commits, changed/untracked/ignored files, failed or cancelled workers,
+and uncertain cleanup retain the checkout. Use `worktreeNotes` and the agent
+trace `cwd` to inspect and integrate the result; no changes are auto-merged into
+the caller. Retained commits remain reachable through their worktree. Worktrees
+are Git isolation, not a security sandbox: native permission checks remain in force.
+
 ## 为什么有这个项目
 
 Anthropic 的动态 workflow 很强,但它只能跑在 Anthropic 自家的 harness 里,而且需要 Max 订阅。

@@ -11,6 +11,8 @@ export { codexExecutor, buildCodexArgs } from "./executor/codex/codex.js";
 export { grokExecutor, buildGrokArgs } from "./executor/grok/grok.js";
 export { cursorExecutor, buildCursorArgs, resolveCursorBin, isCursorCliBinary } from "./executor/cursor/cursor.js";
 export { zcodeExecutor, buildZcodeArgs } from "./executor/zcode/zcode.js";
+export { antigravityExecutor, buildAntigravityArgs, reduceAntigravityEvents } from "./executor/antigravity/antigravity.js";
+export { copilotExecutor, buildCopilotArgs, reduceCopilotEvents } from "./executor/copilot/copilot.js";
 
 // Pure reducers + the shared subprocess driver — exposed so hosts can build their own adapters.
 // 纯归约器 + 共享子进程 driver —— 导出以便 host 自行构建适配器。
@@ -26,6 +28,8 @@ import { codexExecutor } from "./executor/codex/codex.js";
 import { grokExecutor } from "./executor/grok/grok.js";
 import { cursorExecutor } from "./executor/cursor/cursor.js";
 import { zcodeExecutor } from "./executor/zcode/zcode.js";
+import { antigravityExecutor } from "./executor/antigravity/antigravity.js";
+import { copilotExecutor } from "./executor/copilot/copilot.js";
 
 // Out-of-the-box registry, ready to pass as RunOptions.executors (or extend).
 // There is still no implicit default: agent() must name one, unless the host sets
@@ -39,4 +43,6 @@ export const builtinExecutors = {
   grok: grokExecutor,
   claude: claudeExecutor,
   codex: codexExecutor,
+  antigravity: antigravityExecutor,
+  copilot: copilotExecutor,
 };
