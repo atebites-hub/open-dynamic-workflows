@@ -126,6 +126,8 @@ export interface TokenUsage {
 }
 
 export interface ExecOptions {
+  /** Default: a new CLI process group. An external job supervisor may own an inherited group. */
+  processGroup?: "inherit";
   prompt: string;
   cwd: string;
   model?: string;
