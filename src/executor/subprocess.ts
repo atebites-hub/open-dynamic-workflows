@@ -213,7 +213,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
             // 子进程、bash）。取消时必须杀掉整棵进程树，而不只是顶层
             // process, or those grandchildren are orphaned. We keep the pipes (no unref).
             // 进程，否则那些孙子进程会变成孤儿。我们保留管道（不 unref）。
-            detached: true,
+            detached: opts.processGroup !== "inherit",
           });
 
           // Kill the child's entire process group (negative pid). Falls back to the lone
@@ -222,7 +222,8 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           // 不是组长进程）则退回到只杀单个子进程。绝不抛异常。
           const killTree = (sig: NodeJS.Signals): void => {
             try {
-              if (child.pid !== undefined) process.kill(-child.pid, sig);
+              if (opts.processGroup === "inherit") child.kill(sig);
+              else if (child.pid !== undefined) process.kill(-child.pid, sig);
               else child.kill(sig);
             } catch {
               try {
@@ -249,24 +250,41 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           let sawStdout = false;
 
           const onAbort = (): void => {
-            if (settled) return;
-            settled = true;
-            clearTimers();
-            killTree("SIGKILL");
-            runCleanup();
-            dbg("aborted by signal");
-            reject(new Error(`${spec.command} aborted`));
+            fail(`${spec.command} aborted`, "aborted");
           };
 
-          const fail = (message: string): void => {
+          const fail = (message: string, subtype = "error_during_execution"): void => {
             if (settled) return;
             settled = true;
             clearTimers();
             opts.signal?.removeEventListener("abort", onAbort);
             killTree("SIGKILL");
-            runCleanup();
             dbg(`fail: ${message}`);
-            reject(new Error(message));
+            // A cancelled process never reaches the normal close-path trace write.
+            // Keep the available partial events; null exitCode is not a successful exit.
+            const tail = stdoutBuf.trim();
+            if (tail) {
+              try { const event = spec.parseLine(tail); if (event !== null) events.push(event); }
+              catch { /* An interrupted final line may be incomplete. */ }
+            }
+            stdoutBuf = "";
+            let runtimeId: string | null = null;
+            try { runtimeId = spec.reduce(events, { stderr: stderrBuf, exitCode: null, opts }).sessionId; }
+            catch { /* Partial schema output need not be reducible. Raw events are retained. */ }
+            const finishFailure = (): void => { runCleanup(); reject(new Error(message)); };
+            if (opts.tracePath) {
+              void writeTrace(opts.tracePath, {
+                command: spec.command, args, cwd: opts.cwd, prompt: opts.prompt,
+                durationMs: Date.now() - startedAt, exitCode: null, isError: true,
+                resultSubtype: subtype, stderr: `${stderrBuf}${stderrBuf ? "\n" : ""}${message}`,
+                events,
+                ...(opts.routingPolicyFingerprint !== undefined && opts.effectiveRoute !== undefined
+                  ? { routing: { policyFingerprint: opts.routingPolicyFingerprint,
+                      executor: opts.effectiveRoute.executor, model: opts.effectiveRoute.model,
+                      reasoningEffort: opts.effectiveRoute.reasoningEffort, runtimeId } }
+                  : {}),
+              }).then(finishFailure);
+            } else finishFailure();
           };
 
           // Abort signal: kill + reject.
@@ -277,7 +295,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
 
           // Wall-clock timeout.
           // 墙钟超时。
-          wallTimer = setTimeout(() => fail(`${spec.command} timeout`), timeoutMs);
+          wallTimer = setTimeout(() => fail(`${spec.command} timeout`, "timeout"), timeoutMs);
 
           // Idle (stdout-arrival) watchdog. NOTE: this is a STREAM-based idle — it resets only when
           // stdout bytes arrive. For single-envelope executors that emit nothing until the end (zcode
@@ -297,6 +315,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
                     (sawStdout
                       ? ""
                       : " (no stdout received — for single-envelope executors like zcode, idleTimeoutMs is stream-based and ineffective; use the wall timeout)"),
+                  "idle_timeout",
                 ),
               opts.idleTimeoutMs,
             );
@@ -319,7 +338,7 @@ export function makeSubprocessExecutor(spec: SubprocessSpec): Executor {
           child.stdout.setEncoding("utf8");
           child.stdout.on("data", (chunk: string) => {
             sawStdout = true;
-            armIdle();
+            if (!settled) armIdle();
             consume(chunk);
           });
 

@@ -25,7 +25,7 @@ import {
 // executors do — including the stderr fallback on an error result with empty text.
 // 一个“CLI”是 `node -e <body>` 的执行器。body 往 stdout 打 JSONL、往 stderr 打文本、
 // 以任意退出码退出。reduce() 像真实执行器那样折叠事件——含错误且 text 为空时的 stderr 兜底。
-function nodeExecutor(body: string, sessionId: string | null = null) {
+function nodeExecutor(body: string, sessionId: string | null = null, onEvent?: (event: unknown) => void) {
   return makeSubprocessExecutor({
     command: process.execPath, // node
     prepare: async (_opts: ExecOptions) => ({ args: ["-e", body] }),
@@ -33,7 +33,9 @@ function nodeExecutor(body: string, sessionId: string | null = null) {
       const t = line.trim();
       if (t.length === 0) return null;
       try {
-        return JSON.parse(t);
+        const event = JSON.parse(t);
+        onEvent?.(event);
+        return event;
       } catch {
         return null;
       }
@@ -247,4 +249,38 @@ test("subprocess: idle timeout after activity (stdout seen, then silent) does NO
       return true;
     },
   );
+});
+
+test("subprocess: cancellation retains partial events and route before rejecting", async () => {
+  let ready!: () => void;
+  const started = new Promise<void>((resolve) => { ready = resolve; });
+  const controller = new AbortController();
+  const opts = freshOpts({
+    signal: controller.signal,
+    routingPolicyFingerprint: "d".repeat(64),
+    effectiveRoute: { executor: "fake", model: "model-d", reasoningEffort: "high" },
+  });
+  const execution = nodeExecutor(
+    `console.log(JSON.stringify({type:'started',session_id:'cancelled-runtime'}));setInterval(()=>{},1000);`,
+    "cancelled-runtime", ready,
+  )(opts);
+  await started;
+  controller.abort();
+  await assert.rejects(execution, /aborted/);
+  const trace = JSON.parse(readFileSync(opts.tracePath as string, "utf8")) as ExecTrace;
+  assert.equal(trace.isError, true);
+  assert.equal(trace.exitCode, null);
+  assert.match(trace.resultSubtype, /abort/);
+  assert.equal(trace.events.length, 1);
+  assert.equal(trace.routing?.runtimeId, "cancelled-runtime");
+  assert.equal(statSync(opts.tracePath as string).mode & 0o777, 0o600);
+});
+
+test("subprocess: wall timeout retains a failure trace", async () => {
+  const opts = freshOpts({ timeoutMs: 100 });
+  await assert.rejects(nodeExecutor(`setInterval(()=>{},1000);`)(opts), /timeout/);
+  const trace = JSON.parse(readFileSync(opts.tracePath as string, "utf8")) as ExecTrace;
+  assert.equal(trace.isError, true);
+  assert.equal(trace.exitCode, null);
+  assert.match(trace.resultSubtype, /timeout/);
 });
