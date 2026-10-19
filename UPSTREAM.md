@@ -39,9 +39,8 @@ That SHA is the current merge-base of `origin/main` and `upstream/main` (they
 match: this fork is **ahead**, not behind). Reconfirmed 2026-09-10: GitHub
 compare `imsai-sh:main...atebites-hub:main` is **ahead 29 / behind 0**; weekday
 Sync upstream run [`34505742574`](https://github.com/atebites-hub/open-dynamic-workflows/actions/runs/34505742574)
-logged `origin/main already contains upstream/main; nothing to sync`. The weekday
-sync workflow rewrites only the `upstream-tip-begin/end` span when it opens a
-clean sync PR.
+logged `origin/main already contains upstream/main; nothing to sync`. On a clean
+manual sync, update the `upstream-tip-begin/end` span in this file.
 
 ## Owners
 
@@ -69,7 +68,7 @@ them in an upstream merge without recording the deferral here.
 | cursor-agent executor | First-class Cursor CLI next to grok/claude/codex/zcode | `037a6cc` (PR #5) |
 | Cursor unattended executor | `--trust` / `--approve-mcps`, no `--plugin-dir`, fingerprint Cursor's `agent` | `3181365` (PR #8) |
 | Immutable `routingPolicy` | Bind one route to every model node; tests close acceptance gaps | `bb265f2`, `6230c13` (PR #7) |
-| Fork-maintenance docs + weekday sync | `UPSTREAM.md` + `.github/workflows/sync-upstream.yml`; keep the GitHub fork relationship | `ac6d690` (PR #9) |
+| Fork-maintenance docs | `UPSTREAM.md`; keep the GitHub fork relationship. The weekday sync workflow was removed | `ac6d690` (PR #9) |
 | Weekly Actions artifact cleanup | Delete artifacts older than 3 days (`cleanup-artifacts.yml`) | `b39289c` (PR #10) |
 | fast-uri lockfile pin | Transitive `package-lock.json` pin to patched `3.1.7` (not a marketplace / plugin pin) | `294913b` (PR #11) |
 
@@ -125,14 +124,6 @@ git push -u origin HEAD
 # Open PR title: chore: sync upstream
 # Merge with a merge commit.
 ```
-
-Weekday automation: `.github/workflows/sync-upstream.yml` (UTC cron `23 13 * * 1-5`,
-plus `workflow_dispatch`). If an open PR already has that exact title, the
-workflow leaves it alone.
-
-`GITHUB_TOKEN` pull requests do not start other workflows. Set repository secret
-`UPSTREAM_SYNC_TOKEN` (Factory Plugins bot PAT with `contents` + `pull-requests`)
-so sync PRs still run CI.
 
 ### After every sync
 
