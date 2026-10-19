@@ -69,7 +69,7 @@ them in an upstream merge without recording the deferral here.
 | Cursor unattended executor | `--trust` / `--approve-mcps`, no `--plugin-dir`, fingerprint Cursor's `agent` | `3181365` (PR #8) |
 | Immutable `routingPolicy` | Bind one route to every model node; tests close acceptance gaps | `bb265f2`, `6230c13` (PR #7) |
 | Fork-maintenance docs | `UPSTREAM.md`; keep the GitHub fork relationship. The weekday sync workflow was removed | `ac6d690` (PR #9) |
-| Weekly Actions artifact cleanup | Delete artifacts older than 3 days (`cleanup-artifacts.yml`) | `b39289c` (PR #10) |
+| Weekly Actions artifact cleanup | Removed. `.github/workflows/cleanup-artifacts.yml` is no longer on this fork | `b39289c` (PR #10) |
 | fast-uri lockfile pin | Transitive `package-lock.json` pin to patched `3.1.7` (not a marketplace / plugin pin) | `294913b` (PR #11) |
 
 Non-merge factory commits (newest first):
